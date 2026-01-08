@@ -168,11 +168,18 @@ class NoisyRMABEnvironment(RMABEnvironment):
                  seed: int = 42):
         super().__init__(config, seed=seed)
         self.noise_config = noise_config
+        self.t = 0  # Initialize time step counter
         
         # Build Q_R matrix
         R = config.experiment.R
         self.q_err = compute_q_err(R, noise_config)
         self.Q_R = build_Q_R_matrix(self.J, self.q_err, noise_config)
+    
+    def reset(self, seed: Optional[int] = None):
+        """Reset environment with new seed."""
+        result = super().reset(seed)
+        self.t = 0
+        return result
         
     def step(self, actions: np.ndarray):
         """
@@ -185,7 +192,7 @@ class NoisyRMABEnvironment(RMABEnvironment):
         for arm in self.arms:
             P = self.arm_classes[arm.class_idx].P_bar
             probs = P[arm.s_true, :]
-            arm.s_true = self.rng.choice(self.J, p=probs)
+            arm.s_true = self.rng_physics.choice(self.J, p=probs)
         
         # Step 2: Process actions with noisy observations
         total_reward = 0.0
@@ -194,14 +201,14 @@ class NoisyRMABEnvironment(RMABEnvironment):
         for i, arm in enumerate(self.arms):
             if actions[i] == 1:
                 # Attempt sync
-                success = self.rng.random() < self.arm_classes[arm.class_idx].p_s
+                success = self.rng_channel.random() < self.arm_classes[arm.class_idx].p_s
 
                 successes.append(success)
                 
                 if success:
                     # MODIFIED: Apply observation noise
                     h_observed = sample_noisy_observation(
-                        arm.s_true, self.Q_R, self.rng
+                        arm.s_true, self.Q_R, self.rng_channel
                     )
                     arm.h = h_observed  # DT receives noisy observation
                     arm.delta = 1
@@ -212,28 +219,46 @@ class NoisyRMABEnvironment(RMABEnvironment):
                 arm.delta = min(arm.delta + 1, self.delta_max)
         
         # Compute metrics
-        oracle_aoii = np.mean([
+        observations = self._get_observations()
+        oracle_aoii = np.array([
             self._compute_oracle_aoii(arm) for arm in self.arms
         ])
-        control_cost = np.mean([
+        control_costs = np.array([
             self._compute_control_cost(arm) for arm in self.arms
         ])
         
         self.t += 1
         
-        # Build result (simplified)
+        # Build result using parent's StepResult format
         from environment import StepResult
         return StepResult(
-            t=self.t,
-            actions=actions,
+            observations=observations,
+            oracle_aoii=oracle_aoii,
+            control_costs=control_costs,
             successes=np.array(successes),
-            total_reward=total_reward,
+            rewards=-oracle_aoii.sum(),
             info={
-                'mean_oracle_aoii': oracle_aoii,
-                'mean_control_cost': control_cost,
+                'epoch': self.t,
+                'mean_oracle_aoii': oracle_aoii.mean(),
+                'mean_control_cost': control_costs.mean(),
                 'q_err': self.q_err,
+                'n_scheduled': actions.sum(),
+                'n_success': np.sum(successes),
             }
         )
+    
+    def _compute_oracle_aoii(self, arm) -> float:
+        """Compute oracle AoII for an arm."""
+        if arm.s_true == arm.h:
+            return 0.0
+        else:
+            return float(arm.delta)
+    
+    def _compute_control_cost(self, arm) -> float:
+        """Compute control cost for an arm."""
+        from config import compute_control_cost
+        arm_config = self.arm_classes[arm.class_idx]
+        return compute_control_cost(arm.h, arm.delta, arm_config.P_bar)
 
 
 # =============================================================================

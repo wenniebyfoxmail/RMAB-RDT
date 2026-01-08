@@ -143,6 +143,9 @@ class SeasonalRMABEnvironment:
         self.J = config.arm_classes[0].P_bar.shape[0]
         self.delta_max = config.experiment.delta_max
         
+        # Store arm_classes for policy compatibility
+        self.arm_classes = config.arm_classes
+        
         # Store base parameters for each arm class
         self.arm_class_params = []
         for ac in config.arm_classes:
@@ -157,6 +160,7 @@ class SeasonalRMABEnvironment:
             })
         
         self.arms: List[ArmState] = []
+        self.arm_class_indices = []  # Will be populated in reset
         self.t = 0
         
     def reset(self, seed: Optional[int] = None) -> None:
@@ -166,12 +170,14 @@ class SeasonalRMABEnvironment:
         
         self.t = 0
         self.arms = []
+        self.arm_class_indices = np.zeros(self.N, dtype=np.int32)
         
         # Assign arms to classes
         n_classes = len(self.arm_class_params)
         for i in range(self.N):
             class_idx = i % n_classes
             params = self.arm_class_params[class_idx]
+            self.arm_class_indices[i] = class_idx
 
             arm = ArmState(
                 s_true=0,  # Start in best state
@@ -248,9 +254,13 @@ class SeasonalRMABEnvironment:
         else:
             return float(delta)
     
-    def get_observations(self) -> List[Tuple[int, int, int]]:
-        """Get current observations for all arms."""
-        return [(arm.arm_id, arm.h, arm.delta) for arm in self.arms]
+    def get_observations(self) -> np.ndarray:
+        """Get current observations for all arms as (h, delta) pairs."""
+        obs = np.zeros((self.N, 2), dtype=np.int32)
+        for i, arm in enumerate(self.arms):
+            obs[i, 0] = arm.h
+            obs[i, 1] = arm.delta
+        return obs
 
 
 def run_nonhomogeneous_experiment(
