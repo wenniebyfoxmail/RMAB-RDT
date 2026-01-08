@@ -1,189 +1,142 @@
 #!/usr/bin/env python3
 """
-Road DT AoII-ARD RMAB: One-Click Experiment Runner
-===================================================
-
-Implements all experiments with automatic parallel execution.
-
-Script Execution Order:
-  01_main_experiments.py  - P0: Fig1-3, Table1 (main results)
-  02_regime_map.py        - P1: Fig4 (policy boundary)
-  03_time_varying.py      - P1: Fig5 (seasonal variation)
-  04_indexability.py      - P1: Appendix (verification)
-  05_noise_sensitivity.py - P2: Appendix (Q_R channel)
+Road DT AoII-ARD RMAB - Run All Experiments
+===========================================
+Unified entry point for all experiments.
 
 Usage:
-    python run_all.py --quick    # Quick test (~15-20 min)
-    python run_all.py --full     # Full experiments (~1-1.5 hours with parallel)
+    python run_all.py --quick      # Quick test (~15 min)
+    python run_all.py --full       # Full experiments (~1-2 hours)
 """
 
-import argparse
 import subprocess
 import sys
+import os
 import time
+import multiprocessing as mp
 from pathlib import Path
 
-from parallel_utils import print_system_info, get_optimal_workers, get_cpu_count
+
+def get_cpu_info():
+    """Get CPU information for parallel execution."""
+    total_cores = mp.cpu_count()
+    available_cores = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else total_cores
+    recommended = max(1, min(available_cores - 1, 8))
+    return total_cores, available_cores, recommended
 
 
-def run_command(cmd: str, description: str) -> bool:
-    """Run a command and return success status."""
-    print("\n" + "=" * 60)
-    print(f"🚀 {description}")
-    print("=" * 60)
-    print(f"Command: {cmd}\n")
-    
-    start = time.time()
-    result = subprocess.run(cmd, shell=True)
-    elapsed = time.time() - start
-    
+def run_script(script_name, args, description):
+    """Run a Python script with given arguments."""
+    cmd = [sys.executable, script_name] + args
+    print(f"\nCommand: python {script_name} {' '.join(args)}")
+    print()
+
+    start_time = time.time()
+    result = subprocess.run(cmd, capture_output=False)
+    elapsed = time.time() - start_time
+
     if result.returncode == 0:
-        print(f"\n✅ {description} completed in {elapsed/60:.1f} min")
-        return True
+        print(f"\n✅ {description} completed ({elapsed:.1f}s)")
     else:
         print(f"\n❌ {description} FAILED (exit code {result.returncode})")
-        return False
+
+    return result.returncode == 0
 
 
 def main():
+    import argparse
     parser = argparse.ArgumentParser(description='Run all RMAB experiments')
-    parser.add_argument('--quick', action='store_true', help='Quick test mode (~15-20 min)')
-    parser.add_argument('--full', action='store_true', help='Full experiments (~1-1.5 hours)')
-    parser.add_argument('--skip-main', action='store_true', help='Skip 01_main_experiments')
-    parser.add_argument('--skip-regime', action='store_true', help='Skip 02_regime_map')
-    parser.add_argument('--skip-time', action='store_true', help='Skip 03_time_varying')
-    parser.add_argument('--skip-index', action='store_true', help='Skip 04_indexability')
-    parser.add_argument('--skip-noise', action='store_true', help='Skip 05_noise_sensitivity')
+    parser.add_argument('--quick', action='store_true', help='Quick mode (reduced parameters)')
+    parser.add_argument('--full', action='store_true', help='Full experiments')
     parser.add_argument('--output', type=str, default='results', help='Output directory')
-    parser.add_argument('--workers', type=int, default=None, help='Number of parallel workers (default: auto)')
+    parser.add_argument('--workers', type=int, default=None, help='Number of parallel workers')
+    parser.add_argument('--no-parallel', action='store_true', help='Disable parallel execution')
     args = parser.parse_args()
-    
+
     if not args.quick and not args.full:
-        print("Please specify --quick or --full mode")
-        print("  --quick: Fast validation (~15-20 min)")
-        print("  --full:  Complete experiments (~1-1.5 hours with parallel)")
-        sys.exit(1)
-    
-    mode = "quick" if args.quick else "full"
-    output_dir = args.output
-    quick_flag = "--quick" if args.quick else ""
-    
-    # Determine workers
-    n_workers = args.workers if args.workers else get_optimal_workers()
-    worker_flag = f"--workers {n_workers}"
-    
-    # Create output directories
-    Path(f"{output_dir}/data").mkdir(parents=True, exist_ok=True)
-    Path(f"{output_dir}/figures").mkdir(parents=True, exist_ok=True)
-    Path(f"{output_dir}/indexability").mkdir(parents=True, exist_ok=True)
-    
-    print("\n" + "=" * 60)
-    print(f"🔬 ROAD DT AoII-ARD RMAB EXPERIMENTS ({mode.upper()} MODE)")
+        args.quick = True  # Default to quick
+
+    # Get CPU info
+    total_cores, available_cores, recommended = get_cpu_info()
+    n_workers = args.workers if args.workers else recommended
+
+    if args.no_parallel:
+        n_workers = 1
+
     print("=" * 60)
-    
-    # Print system info
-    print_system_info()
-    
-    if args.quick:
-        print("\n⏱️  Estimated time: 15-20 minutes (with parallel)")
-    else:
-        print("\n⏱️  Estimated time: 1-1.5 hours (with parallel)")
-    
-    print(f"📁 Output directory: {output_dir}/")
-    print(f"🔧 Parallel workers: {n_workers}")
-    
-    print("\n📋 Execution Order:")
-    print("  [01] Main Experiments: Fig1-3, Table1")
-    print("  [02] Regime Map: Fig4 (Whittle vs Myopic)")
-    print("  [03] Time-Varying: Fig5 (seasonal)")
-    print("  [04] Indexability: Appendix verification")
-    print("  [05] Noise Sensitivity: Appendix Q_R")
-    print("  [06] LP Comparison: Fig6 (Whittle vs LP + wall-clock) ⭐")
-    print("  [07] LTPP Calibration: Parameter validation ⭐")
+    print("🔬 ROAD DT AoII-ARD RMAB EXPERIMENTS", "(QUICK MODE)" if args.quick else "(FULL MODE)")
     print("=" * 60)
-    
-    total_start = time.time()
+    print("=" * 50)
+    print("SYSTEM INFORMATION")
+    print("=" * 50)
+    print(f"CPU cores (total): {total_cores}")
+    print(f"CPU cores (available): {available_cores}")
+    print(f"Workers: {n_workers}")
+    print("=" * 50)
+    print()
+
+    mode_args = ['--quick'] if args.quick else []
+    output_args = ['--output', args.output]
+
+    # Create output directory
+    Path(args.output).mkdir(parents=True, exist_ok=True)
+
+    # Define experiments with their specific arguments
+    # Format: (script, description, supports_workers)
+    experiments = [
+        ('01_main_experiments.py', 'Main Experiments (Fig1-3 + Table1)', False),
+        ('02_regime_map.py', 'Regime Map (Fig4)', True),
+        ('03_time_varying.py', 'Time-Varying (Fig5)', True),
+        ('04_indexability.py', 'Indexability Verification', False),
+        ('05_noise_sensitivity.py', 'Noise Sensitivity', True),
+        ('lp_comparison.py', 'LP Comparison (Fig6)', False),
+        ('ltpp_calibration.py', 'LTPP Calibration', False),
+    ]
+
     results = []
-    
-    # ========== 01: Main Experiments ==========
-    if not args.skip_main:
-        cmd = f"python 01_main_experiments.py {quick_flag} {worker_flag} --output {output_dir}"
-        success = run_command(cmd, "[01] Main Experiments (Fig1-3 + Table1)")
-        results.append(("01_main_experiments", success))
-    
-    # ========== 02: Regime Map ==========
-    if not args.skip_regime:
-        cmd = f"python 02_regime_map.py {quick_flag} {worker_flag} --output {output_dir}"
-        success = run_command(cmd, "[02] Regime Map (Fig4)")
-        results.append(("02_regime_map", success))
-    
-    # ========== 03: Time-Varying ==========
-    if not args.skip_time:
-        cmd = f"python 03_time_varying.py {quick_flag} {worker_flag} --output {output_dir}"
-        success = run_command(cmd, "[03] Time-Varying (Fig5)")
-        results.append(("03_time_varying", success))
-    
-    # ========== 04: Indexability ==========
-    if not args.skip_index:
-        cmd = f"python 04_indexability.py --output {output_dir}/indexability"
-        success = run_command(cmd, "[04] Indexability Verification")
-        results.append(("04_indexability", success))
-    
-    # ========== 05: Noise Sensitivity ==========
-    if not args.skip_noise:
-        cmd = f"python 05_noise_sensitivity.py {quick_flag} {worker_flag} --output {output_dir}"
-        success = run_command(cmd, "[05] Noise Sensitivity")
-        results.append(("05_noise_sensitivity", success))
-    
-    # ========== 06: LP Comparison ==========
-    cmd = f"python lp_comparison.py {quick_flag} --output {output_dir}"
-    success = run_command(cmd, "[06] LP vs Whittle Comparison (Fig6)")
-    results.append(("06_lp_comparison", success))
-    
-    # ========== 07: LTPP Calibration ==========
-    cmd = f"python ltpp_calibration.py --output {output_dir}"
-    success = run_command(cmd, "[07] LTPP Calibration Validation")
-    results.append(("07_ltpp_calibration", success))
-    
-    # ========== Summary ==========
+    total_start = time.time()
+
+    for i, (script, description, supports_workers) in enumerate(experiments, 1):
+        print()
+        print("=" * 60)
+        print(f"🚀 [{i:02d}] {description}")
+        print("=" * 60)
+
+        if not os.path.exists(script):
+            print(f"⚠️ Script not found: {script}, skipping...")
+            results.append((description, None))
+            continue
+
+        # Build arguments
+        script_args = mode_args + output_args
+
+        # Only add --workers for scripts that support it
+        if supports_workers and n_workers > 1:
+            script_args += ['--workers', str(n_workers)]
+
+        success = run_script(script, script_args, description)
+        results.append((description, success))
+
+    # Summary
     total_elapsed = time.time() - total_start
-    
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print("📊 EXPERIMENT SUMMARY")
     print("=" * 60)
-    
-    all_success = True
-    for name, success in results:
-        status = "✅ PASS" if success else "❌ FAIL"
-        print(f"  {name}: {status}")
-        if not success:
-            all_success = False
-    
-    print(f"\n⏱️  Total time: {total_elapsed/60:.1f} minutes")
-    print(f"🔧 Workers used: {n_workers}")
-    
-    if all_success:
-        print("\n" + "=" * 60)
-        print("🎉 ALL EXPERIMENTS COMPLETED SUCCESSFULLY!")
-        print("=" * 60)
-        print(f"\n📁 Output files in {output_dir}/:")
-        print("\n  [P0] Main Results (论文主图):")
-        print("    data/fig1_n_sweep.csv")
-        print("    data/fig2_m_sweep.csv")
-        print("    data/fig3_ps_sweep.csv")
-        print("    data/table1_summary.csv")
-        print("    figures/fig1_*.pdf, fig2_*.pdf, fig3_*.pdf")
-        print("\n  [P1] Novelty Evidence (顶刊防守):")
-        print("    data/fig4_regime_map.csv, figures/fig4_regime_map.pdf")
-        print("    data/fig5_time_varying.csv, figures/fig5_*.pdf")
-        print("    data/fig6_lp_comparison.csv, figures/fig6_lp_comparison.pdf ⭐")
-        print("    indexability/*.png")
-        print("\n  [P2] Calibration & Appendix:")
-        print("    data/ltpp_calibration.csv, figures/ltpp_calibration.pdf ⭐")
-        print("    data/noise_sensitivity.csv, figures/noise_sensitivity.pdf")
-    else:
-        print("\n⚠️  Some experiments failed. Check logs above.")
-        sys.exit(1)
+
+    for desc, success in results:
+        if success is None:
+            status = "⏭️ SKIPPED"
+        elif success:
+            status = "✅ PASS"
+        else:
+            status = "❌ FAIL"
+        print(f"  {status}  {desc}")
+
+    print()
+    print(f"Total time: {total_elapsed / 60:.1f} minutes")
+    print(f"Results saved to: {args.output}/")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
