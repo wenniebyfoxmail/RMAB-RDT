@@ -253,7 +253,7 @@ def get_default_nhgp_classes(J: int = 5,
     # Base NHGP parameters (CALIBRATED for meaningful experiments)
     # SOURCE: Synthetic but physics-consistent
     base_nhgp = NHGPParams(
-        c=0.3,      # ← 退化率提高4倍
+        c=0.2,      # ← 退化率提高4倍
         b=1.0,
         beta=1.0,
         delta_T=1.0
