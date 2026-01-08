@@ -110,6 +110,7 @@ def main():
         ('05_noise_sensitivity.py', 'Noise Sensitivity', True),
         ('lp_comparison.py', 'LP Comparison (Fig6)', False),
         ('ltpp_calibration.py', 'LTPP Calibration', False),
+        ('ontario_calibration.py', 'Ontario Real Data Validation ⭐', False),  # 真实数据验证
     ]
 
     results = []
@@ -127,11 +128,27 @@ def main():
             continue
 
         # Build script-specific arguments
-        script_args = mode_args + output_args
+        script_args = output_args.copy()  # Start with output args
+        
+        # Add mode args only for scripts that support it
+        # ontario_calibration.py doesn't support --quick
+        if script != 'ontario_calibration.py':
+            script_args = mode_args + script_args
 
         # Only add --workers if script supports it AND parallel is enabled
         if supports_workers and n_workers > 1:
             script_args += worker_args
+        
+        # Special handling for ontario_calibration.py
+        if script == 'ontario_calibration.py':
+            # Check common data directory locations
+            for data_dir in ['data/ontario', '../data/ontario', './data/ontario']:
+                if os.path.exists(data_dir):
+                    script_args += ['--data-dir', data_dir]
+                    print(f"   Found Ontario data at: {data_dir}")
+                    break
+            else:
+                print(f"   ⚠️ Ontario data directory not found, using default")
 
         success = run_script(script, script_args, description)
         results.append((description, success))
