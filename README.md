@@ -2,7 +2,7 @@
 
 **Parallel-Enabled Edition** - 自动检测CPU核心数并行执行
 
-## 项目概述 test
+## 项目概述 test etst
 
 本项目实现了基于 **Age of Incorrect Information (AoII)** 与 **Age-Rate-Distortion (ARD)** 理论的 **Restless Multi-Armed Bandit (RMAB)** 调度仿真系统。
 
