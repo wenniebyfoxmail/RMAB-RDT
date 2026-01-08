@@ -7,20 +7,29 @@ Unified entry point for all experiments.
 Usage:
     python run_all.py --quick      # Quick test (~15 min)
     python run_all.py --full       # Full experiments (~1-2 hours)
+    python run_all.py --quick --no-parallel  # Safe mode for Colab
 """
 
 import subprocess
 import sys
 import os
 import time
-import multiprocessing as mp
 from pathlib import Path
 
 
 def get_cpu_info():
     """Get CPU information for parallel execution."""
-    total_cores = mp.cpu_count()
-    available_cores = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else total_cores
+    try:
+        import multiprocessing as mp
+        total_cores = mp.cpu_count()
+    except:
+        total_cores = 2
+
+    try:
+        available_cores = len(os.sched_getaffinity(0))
+    except:
+        available_cores = total_cores
+
     recommended = max(1, min(available_cores - 1, 8))
     return total_cores, available_cores, recommended
 
@@ -28,19 +37,27 @@ def get_cpu_info():
 def run_script(script_name, args, description):
     """Run a Python script with given arguments."""
     cmd = [sys.executable, script_name] + args
-    print(f"\nCommand: python {script_name} {' '.join(args)}")
+    cmd_str = f"python {script_name} {' '.join(args)}"
+    print(f"\nCommand: {cmd_str}")
     print()
 
     start_time = time.time()
-    result = subprocess.run(cmd, capture_output=False)
-    elapsed = time.time() - start_time
+    try:
+        result = subprocess.run(cmd, timeout=1800)  # 30 min timeout
+        elapsed = time.time() - start_time
 
-    if result.returncode == 0:
-        print(f"\n✅ {description} completed ({elapsed:.1f}s)")
-    else:
-        print(f"\n❌ {description} FAILED (exit code {result.returncode})")
-
-    return result.returncode == 0
+        if result.returncode == 0:
+            print(f"\n✅ {description} completed ({elapsed:.1f}s)")
+            return True
+        else:
+            print(f"\n❌ {description} FAILED (exit code {result.returncode})")
+            return False
+    except subprocess.TimeoutExpired:
+        print(f"\n⏱️ {description} TIMEOUT (>30min)")
+        return False
+    except Exception as e:
+        print(f"\n❌ {description} ERROR: {e}")
+        return False
 
 
 def main():
@@ -50,41 +67,43 @@ def main():
     parser.add_argument('--full', action='store_true', help='Full experiments')
     parser.add_argument('--output', type=str, default='results', help='Output directory')
     parser.add_argument('--workers', type=int, default=None, help='Number of parallel workers')
-    parser.add_argument('--no-parallel', action='store_true', help='Disable parallel execution')
+    parser.add_argument('--no-parallel', action='store_true', help='Disable parallel (safe for Colab)')
     args = parser.parse_args()
 
     if not args.quick and not args.full:
-        args.quick = True  # Default to quick
+        args.quick = True
 
-    # Get CPU info
+    # CPU info
     total_cores, available_cores, recommended = get_cpu_info()
-    n_workers = args.workers if args.workers else recommended
 
+    # Determine workers
     if args.no_parallel:
         n_workers = 1
+    elif args.workers:
+        n_workers = args.workers
+    else:
+        n_workers = recommended
 
+    mode_str = "QUICK MODE" if args.quick else "FULL MODE"
     print("=" * 60)
-    print("🔬 ROAD DT AoII-ARD RMAB EXPERIMENTS", "(QUICK MODE)" if args.quick else "(FULL MODE)")
+    print(f"🔬 ROAD DT AoII-ARD RMAB EXPERIMENTS ({mode_str})")
     print("=" * 60)
-    print("=" * 50)
-    print("SYSTEM INFORMATION")
-    print("=" * 50)
-    print(f"CPU cores (total): {total_cores}")
-    print(f"CPU cores (available): {available_cores}")
-    print(f"Workers: {n_workers}")
-    print("=" * 50)
-    print()
-
-    mode_args = ['--quick'] if args.quick else []
-    output_args = ['--output', args.output]
+    print(f"CPU cores: {total_cores} total, {available_cores} available")
+    print(f"Workers: {n_workers}" + (" (parallel disabled)" if args.no_parallel else ""))
+    print(f"Output: {args.output}/")
+    print("=" * 60)
 
     # Create output directory
     Path(args.output).mkdir(parents=True, exist_ok=True)
 
-    # Define experiments with their specific arguments
-    # Format: (script, description, supports_workers)
+    # Build common args
+    mode_args = ['--quick'] if args.quick else []
+    output_args = ['--output', args.output]
+    worker_args = ['--workers', str(n_workers)] if n_workers > 1 else []
+
+    # Define experiments: (script, description, supports_workers)
     experiments = [
-        ('01_main_experiments.py', 'Main Experiments (Fig1-3 + Table1)', False),
+        ('01_main_experiments.py', 'Main Experiments (Fig1-3, Table1)', False),
         ('02_regime_map.py', 'Regime Map (Fig4)', True),
         ('03_time_varying.py', 'Time-Varying (Fig5)', True),
         ('04_indexability.py', 'Indexability Verification', False),
@@ -107,12 +126,12 @@ def main():
             results.append((description, None))
             continue
 
-        # Build arguments
+        # Build script-specific arguments
         script_args = mode_args + output_args
 
-        # Only add --workers for scripts that support it
+        # Only add --workers if script supports it AND parallel is enabled
         if supports_workers and n_workers > 1:
-            script_args += ['--workers', str(n_workers)]
+            script_args += worker_args
 
         success = run_script(script, script_args, description)
         results.append((description, success))
@@ -124,19 +143,40 @@ def main():
     print("📊 EXPERIMENT SUMMARY")
     print("=" * 60)
 
+    passed = 0
+    failed = 0
+    skipped = 0
+
     for desc, success in results:
         if success is None:
             status = "⏭️ SKIPPED"
+            skipped += 1
         elif success:
             status = "✅ PASS"
+            passed += 1
         else:
             status = "❌ FAIL"
+            failed += 1
         print(f"  {status}  {desc}")
 
     print()
+    print(f"Results: {passed} passed, {failed} failed, {skipped} skipped")
     print(f"Total time: {total_elapsed / 60:.1f} minutes")
-    print(f"Results saved to: {args.output}/")
+    print(f"Output directory: {args.output}/")
     print("=" * 60)
+
+    # List outputs
+    print("\n📁 Generated files:")
+    for subdir in ['data', 'figures', 'indexability']:
+        subpath = Path(args.output) / subdir
+        if subpath.exists():
+            files = list(subpath.glob('*'))
+            if files:
+                print(f"  {subdir}/")
+                for f in files[:5]:
+                    print(f"    - {f.name}")
+                if len(files) > 5:
+                    print(f"    ... and {len(files) - 5} more")
 
 
 if __name__ == "__main__":
