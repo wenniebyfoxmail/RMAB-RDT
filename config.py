@@ -216,6 +216,7 @@ def get_nhgp_arm_classes(J: int = 5, R: int = 8,
     """
     # Get channel parameters from DR-06B
     p_s, D = get_channel_params(R)
+    p_s = 0.5  # PATCH: 50% success rate for meaningful AoII
     
     # Get NHGP-based transition matrices (with recovery_prob parameter)
     nhgp_classes = get_default_nhgp_classes(J=J, recovery_prob=recovery_prob)

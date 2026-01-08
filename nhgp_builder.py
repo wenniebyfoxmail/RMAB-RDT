@@ -311,7 +311,7 @@ if __name__ == "__main__":
     print("=== NHGP Transition Matrix Builder Test (v3 - Fixed) ===\n")
     
     # Test basic NHGP parameters
-    nhgp = NHGPParams(c=0.05, b=1.0, beta=1.0, delta_T=1.0)
+    nhgp = NHGPParams(c=0.2, b=1.0, beta=1.0, delta_T=1.0)
     bins = default_bin_config(J=5, max_degradation=5.0)
     
     print(f"NHGP params: c={nhgp.c}, b={nhgp.b}, β={nhgp.beta}")
