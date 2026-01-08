@@ -45,7 +45,7 @@ class NHGPParams:
         - beta: Synthetic (影响退化跳跃幅度的随机性)
         - delta_T: 1.0 (one epoch)
     """
-    c: float = 0.05        # Degradation rate coefficient [SOURCE: Synthetic]
+    c: float = 0.2       # Degradation rate coefficient [SOURCE: Synthetic]
     b: float = 1.0         # Power exponent [SOURCE: Linear degradation]
     beta: float = 1.0      # Gamma rate parameter [SOURCE: Synthetic]
     delta_T: float = 1.0   # Epoch duration [SOURCE: DR-07]
