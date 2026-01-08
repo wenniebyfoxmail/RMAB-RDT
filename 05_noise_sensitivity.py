@@ -183,7 +183,7 @@ class NoisyRMABEnvironment(RMABEnvironment):
         """
         # Step 1: Evolve all true states (same as base)
         for arm in self.arms:
-            P = self.arm_class_map[arm.class_name].P_bar
+            P = self.arm_classes[arm.class_name].P_bar
             probs = P[arm.s_true, :]
             arm.s_true = self.rng.choice(self.J, p=probs)
         

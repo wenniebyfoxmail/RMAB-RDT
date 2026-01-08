@@ -174,14 +174,14 @@ class SeasonalRMABEnvironment:
             params = self.arm_class_params[class_idx]
             
             arm = ArmState(
-                arm_id=i,
-                class_name=params['name'],
                 s_true=0,  # Start in best state
                 h=0,
                 delta=1,
-                p_s=params['p_s'],
+                class_idx=class_idx,
             )
-            # Store parameters for P(t) computation
+            # Store additional parameters as dynamic attributes
+            arm.class_name = params['name']
+            arm.p_s = params['p_s']
             arm.c_0 = params['c_0']
             arm.b = params['b']
             self.arms.append(arm)

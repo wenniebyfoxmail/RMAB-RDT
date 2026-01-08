@@ -370,18 +370,18 @@ class ExperimentRunner:
             start_time = time.time()
             
             if use_parallel:
-                # Parallel execution
-                seed_results = parallel_map(
+                # Parallel execution using functools.partial
+                from functools import partial
+                worker_fn = partial(
                     _run_single_seed,
-                    seeds,
-                    n_workers=n_workers,
                     config_dict=_config_to_dict(config),
                     policy_name=name,
-                    index_tables_data=_serialize_index_tables(index_tables) if name == 'Whittle' else None,
+                    index_tables_data=_serialize_index_tables(index_tables) if name == 'Whittle' else {},
                     T=T,
                     delta_max=delta_max,
                     burn_in_ratio=burn_in_ratio
                 )
+                seed_results = parallel_map(worker_fn, seeds, n_workers=n_workers)
             else:
                 # Sequential execution
                 seed_results = []
