@@ -231,7 +231,19 @@ def get_nhgp_arm_classes(J: int = 5, R: int = 8,
             R=R,
             c_ratio=c_ratio
         ))
-    
+
+    import numpy as np
+    P_high = np.array([
+        [0.5, 0.3, 0.1, 0.05, 0.05],
+        [0.0, 0.5, 0.3, 0.1,  0.1 ],
+        [0.0, 0.0, 0.5, 0.3,  0.2 ],
+        [0.0, 0.0, 0.0, 0.5,  0.5 ],
+        [0.0, 0.0, 0.0, 0.0,  1.0 ],
+    ])
+    for ac in arm_classes:
+        ac.P_bar = P_high.copy()
+
+
     return arm_classes
 
 
