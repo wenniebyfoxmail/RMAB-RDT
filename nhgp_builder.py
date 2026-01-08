@@ -253,10 +253,10 @@ def get_default_nhgp_classes(J: int = 5,
     # Base NHGP parameters (CALIBRATED for meaningful experiments)
     # SOURCE: Synthetic but physics-consistent
     base_nhgp = NHGPParams(
-        c=0.05,      # Moderate degradation [SOURCE: Synthetic]
-        b=1.0,       # Linear degradation [SOURCE: Standard]
-        beta=1.0,    # Gamma rate [SOURCE: Synthetic]
-        delta_T=1.0  # One epoch [SOURCE: DR-07]
+        c=0.20,      # ← 退化率提高4倍
+        b=1.0,
+        beta=1.0,
+        delta_T=1.0
     )
     
     # Bin configuration
