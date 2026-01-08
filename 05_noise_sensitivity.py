@@ -183,7 +183,7 @@ class NoisyRMABEnvironment(RMABEnvironment):
         """
         # Step 1: Evolve all true states (same as base)
         for arm in self.arms:
-            P = self.arm_classes[arm.class_name].P_bar
+            P = self.arm_classes[arm.class_idx].P_bar
             probs = P[arm.s_true, :]
             arm.s_true = self.rng.choice(self.J, p=probs)
         
@@ -194,7 +194,8 @@ class NoisyRMABEnvironment(RMABEnvironment):
         for i, arm in enumerate(self.arms):
             if actions[i] == 1:
                 # Attempt sync
-                success = self.rng.random() < arm.p_s
+                success = self.rng.random() < self.arm_classes[arm.class_idx].p_s
+
                 successes.append(success)
                 
                 if success:

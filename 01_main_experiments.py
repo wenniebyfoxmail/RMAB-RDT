@@ -180,11 +180,14 @@ def _deserialize_index_tables(data: dict) -> Dict[str, 'WhittleIndexTable']:
     """Deserialize Whittle index tables."""
     tables = {}
     for name, table_data in data.items():
+        # 修复后
         table = WhittleIndexTable(
             J=table_data['J'],
-            delta_max=table_data['delta_max']
+            delta_max=table_data['delta_max'],
+            indices=np.array(table_data['indices']),
+            computation_time=0.0,  # Not needed for policy execution
+            class_name=name
         )
-        table.indices = np.array(table_data['indices'])
         tables[name] = table
     return tables
 

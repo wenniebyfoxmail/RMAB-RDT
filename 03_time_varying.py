@@ -156,7 +156,7 @@ class SeasonalRMABEnvironment:
                 'D': ac.D,
             })
         
-        self.arms: List[Arm] = []
+        self.arms: List[ArmState] = []
         self.t = 0
         
     def reset(self, seed: Optional[int] = None) -> None:
@@ -172,7 +172,7 @@ class SeasonalRMABEnvironment:
         for i in range(self.N):
             class_idx = i % n_classes
             params = self.arm_class_params[class_idx]
-            
+
             arm = ArmState(
                 s_true=0,  # Start in best state
                 h=0,
@@ -180,6 +180,7 @@ class SeasonalRMABEnvironment:
                 class_idx=class_idx,
             )
             # Store additional parameters as dynamic attributes
+            arm.arm_id = i  # For observation output
             arm.class_name = params['name']
             arm.p_s = params['p_s']
             arm.c_0 = params['c_0']
