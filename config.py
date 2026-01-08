@@ -196,7 +196,7 @@ class SimulationConfig:
             )
 
 
-def get_nhgp_arm_classes(J: int = 5, R: int = 8, 
+def get_nhgp_arm_classes(J: int = 5, R: int = 8,
                          recovery_prob: float = 0.0) -> List[ArmClassConfig]:
     """
     Get arm classes with NHGP-derived transition matrices.
@@ -234,11 +234,11 @@ def get_nhgp_arm_classes(J: int = 5, R: int = 8,
 
     import numpy as np
     P_high = np.array([
-        [0.5, 0.3, 0.1, 0.05, 0.05],
-        [0.0, 0.5, 0.3, 0.1,  0.1 ],
-        [0.0, 0.0, 0.5, 0.3,  0.2 ],
-        [0.0, 0.0, 0.0, 0.5,  0.5 ],
-        [0.0, 0.0, 0.0, 0.0,  1.0 ],
+        [0.50, 0.30, 0.10, 0.05, 0.05],  # 状态0: 50%转移
+        [0.00, 0.50, 0.30, 0.10, 0.10],  # 状态1: 50%转移
+        [0.00, 0.00, 0.50, 0.30, 0.20],  # 状态2: 50%转移
+        [0.00, 0.00, 0.00, 0.50, 0.50],  # 状态3: 50%转移
+        [0.10, 0.00, 0.00, 0.00, 0.90],  # 状态4: 10%恢复 (外部维护)
     ])
     for ac in arm_classes:
         ac.P_bar = P_high.copy()
