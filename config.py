@@ -90,6 +90,9 @@ R_TABLE = {
     4:  {'p_s': 0.998, 'D': 0.0039},
     8:  {'p_s': 0.996, 'D': 1.5e-5},
     16: {'p_s': 0.989, 'D': 2.3e-10},
+    # 添加以下行 ↓
+    32: {'p_s': 0.90, 'D': 1e-6},   # 新增：90%成功率
+    64: {'p_s': 0.80, 'D': 1e-6},   # 新增：80%成功率
 }
 
 def get_channel_params(R: int) -> Tuple[float, float]:
@@ -110,7 +113,7 @@ class ArmClassConfig:
     P_bar: np.ndarray  # J x J transition matrix (upper triangular, stochastic)
     p_s: float         # Success probability from DR-06B R-table
     D: float = 0.0     # Observation distortion (mainline: 0)
-    R: int = 8         # Rate level (for documentation)
+    R: int = 32         # Rate level (for documentation)
     c_ratio: float = 1.0  # NHGP c scaling ratio (for documentation)
     
     def __post_init__(self):
