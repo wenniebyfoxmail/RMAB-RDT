@@ -978,7 +978,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False):
     else:
         T, n_seeds = 2000, 10
         N_values = [20, 50, 100, 200]
-        M_values = [1, 2, 5, 10, 15, 20]
+        M_values = [1, 2, 3, 5, 7, 10]  # 更低的 M/N，放大策略差距
         ps_values = [0.70, 0.80, 0.90, 0.95, 0.996]
         N_base = 100
     
@@ -1002,7 +1002,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False):
     print("=" * 60)
     
     fig1_results = {}
-    budget_ratio = 0.1
+    budget_ratio = 0.05  # 5% 资源约束，更紧张
     
     for N in N_values:
         M = max(1, int(N * budget_ratio))

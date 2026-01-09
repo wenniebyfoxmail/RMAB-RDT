@@ -216,7 +216,7 @@ def get_nhgp_arm_classes(J: int = 5, R: int = 8,
     """
     # Get channel parameters from DR-06B
     p_s, D = get_channel_params(R)
-    p_s = 0.5  # PATCH: 50% success rate for meaningful AoII
+    p_s = 0.3  # PATCH: 50% success rate for meaningful AoII
     
     # Get NHGP-based transition matrices (with recovery_prob parameter)
     nhgp_classes = get_default_nhgp_classes(J=J, recovery_prob=recovery_prob)
@@ -233,17 +233,31 @@ def get_nhgp_arm_classes(J: int = 5, R: int = 8,
         ))
 
     import numpy as np
-    P_high = np.array([
-        [0.50, 0.30, 0.10, 0.05, 0.05],  # 状态0: 50%转移
-        [0.00, 0.50, 0.30, 0.10, 0.10],  # 状态1: 50%转移
-        [0.00, 0.00, 0.50, 0.30, 0.20],  # 状态2: 50%转移
-        [0.00, 0.00, 0.00, 0.50, 0.50],  # 状态3: 50%转移
-        [0.10, 0.00, 0.00, 0.00, 0.90],  # 状态4: 10%恢复 (外部维护)
+
+    # slow class: 30% 转移概率（稳定路段）
+    P_slow = np.array([
+        [0.70, 0.20, 0.05, 0.03, 0.02],
+        [0.00, 0.70, 0.20, 0.05, 0.05],
+        [0.00, 0.00, 0.70, 0.20, 0.10],
+        [0.00, 0.00, 0.00, 0.70, 0.30],
+        [0.00, 0.00, 0.00, 0.00, 1.00],
     ])
+
+    # fast class: 70% 转移概率（易损路段）
+    P_fast = np.array([
+        [0.30, 0.40, 0.15, 0.10, 0.05],
+        [0.00, 0.30, 0.40, 0.15, 0.15],
+        [0.00, 0.00, 0.30, 0.40, 0.30],
+        [0.00, 0.00, 0.00, 0.30, 0.70],
+        [0.00, 0.00, 0.00, 0.00, 1.00],
+    ])
+
     for ac in arm_classes:
-        ac.P_bar = P_high.copy()
-
-
+        if 'fast' in ac.name:
+            ac.P_bar = P_fast.copy()
+        else:
+            ac.P_bar = P_slow.copy()
+    # ========== END PATCH ==========
     return arm_classes
 
 
