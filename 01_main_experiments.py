@@ -321,7 +321,7 @@ class ExperimentRunner:
                 eval_period.std(),
                 delta_array.mean() if len(delta_array) > 0 else 0,
                 np.percentile(delta_array, 90) if len(delta_array) > 0 else 0)
-    
+
     def run_experiment(self, N: int, M: int, J: int = 5, delta_max: int = 100,
                        T: int = 2000, R: int = 8, n_seeds: int = 10,
                        p_s_override: float = None,
@@ -329,7 +329,7 @@ class ExperimentRunner:
                        parallel: bool = True) -> Dict[str, ExperimentResults]:
         """
         Run experiment with all policies.
-        
+
         Args:
             parallel: If True, run seeds in parallel (auto-detect cores)
         """
@@ -978,7 +978,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False):
     else:
         T, n_seeds = 2000, 10
         N_values = [20, 50, 100, 200]
-        M_values = [1, 2, 3, 5, 7, 10]  # 更低的 M/N，放大策略差距
+        M_values = [1, 2, 3, 5, 8, 10]  # 更多低 M 点
         ps_values = [0.70, 0.80, 0.90, 0.95, 0.996]
         N_base = 100
     
@@ -1002,7 +1002,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False):
     print("=" * 60)
     
     fig1_results = {}
-    budget_ratio = 0.05  # 5% 资源约束，更紧张
+    budget_ratio = 0.05
     
     for N in N_values:
         M = max(1, int(N * budget_ratio))

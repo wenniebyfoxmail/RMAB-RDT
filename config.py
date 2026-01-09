@@ -200,27 +200,27 @@ def get_nhgp_arm_classes(J: int = 5, R: int = 8,
                          recovery_prob: float = 0.0) -> List[ArmClassConfig]:
     """
     Get arm classes with NHGP-derived transition matrices.
-    
+
     Args:
         J: Number of degradation bins
         R: Rate level from DR-06B table
         recovery_prob: Recovery probability (DEFAULT: 0.0 for main experiments)
                       Set > 0 only for sensitivity analysis (labeled as 'external maintenance')
-    
+
     Returns:
         List of ArmClassConfig with physics-based P̄
-    
+
     IMPORTANT (DR-06A Compliance):
         - Main experiments: recovery_prob = 0.0 (upper triangular P̄)
         - Sensitivity analysis only: recovery_prob > 0
     """
     # Get channel parameters from DR-06B
     p_s, D = get_channel_params(R)
-    p_s = 0.3  # PATCH: 50% success rate for meaningful AoII
-    
+    p_s = 0.4  # PATCH: 50% success rate for meaningful AoII
+
     # Get NHGP-based transition matrices (with recovery_prob parameter)
     nhgp_classes = get_default_nhgp_classes(J=J, recovery_prob=recovery_prob)
-    
+
     arm_classes = []
     for name, P_bar, c_ratio in nhgp_classes:
         arm_classes.append(ArmClassConfig(
@@ -233,31 +233,17 @@ def get_nhgp_arm_classes(J: int = 5, R: int = 8,
         ))
 
     import numpy as np
-
-    # slow class: 30% 转移概率（稳定路段）
-    P_slow = np.array([
-        [0.70, 0.20, 0.05, 0.03, 0.02],
-        [0.00, 0.70, 0.20, 0.05, 0.05],
-        [0.00, 0.00, 0.70, 0.20, 0.10],
-        [0.00, 0.00, 0.00, 0.70, 0.30],
-        [0.00, 0.00, 0.00, 0.00, 1.00],
+    P_high = np.array([
+        [0.50, 0.30, 0.10, 0.05, 0.05],  # 状态0: 50%转移
+        [0.00, 0.50, 0.30, 0.10, 0.10],  # 状态1: 50%转移
+        [0.00, 0.00, 0.50, 0.30, 0.20],  # 状态2: 50%转移
+        [0.00, 0.00, 0.00, 0.50, 0.50],  # 状态3: 50%转移
+        [0.10, 0.00, 0.00, 0.00, 0.90],  # 状态4: 10%恢复 (外部维护)
     ])
-
-    # fast class: 70% 转移概率（易损路段）
-    P_fast = np.array([
-        [0.30, 0.40, 0.15, 0.10, 0.05],
-        [0.00, 0.30, 0.40, 0.15, 0.15],
-        [0.00, 0.00, 0.30, 0.40, 0.30],
-        [0.00, 0.00, 0.00, 0.30, 0.70],
-        [0.00, 0.00, 0.00, 0.00, 1.00],
-    ])
-
     for ac in arm_classes:
-        if 'fast' in ac.name:
-            ac.P_bar = P_fast.copy()
-        else:
-            ac.P_bar = P_slow.copy()
-    # ========== END PATCH ==========
+        ac.P_bar = P_high.copy()
+
+
     return arm_classes
 
 

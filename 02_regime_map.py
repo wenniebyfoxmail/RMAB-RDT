@@ -149,8 +149,8 @@ def generate_regime_map(output_dir: str = "results",
         T = 500
         n_seeds = 3
     else:
-        ps_values = [0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80]  # 更低的 p_s 范围
-        budget_ratios = [0.01, 0.02, 0.03, 0.05, 0.07, 0.10]  # 更低的 M/N 范围
+        ps_values = [0.50, 0.60, 0.70, 0.80, 0.90, 0.95, 0.996]
+        budget_ratios = [0.02, 0.04, 0.06, 0.10, 0.15, 0.20]
     
     print("=" * 60)
     print("REGIME MAP: Whittle vs Myopic Policy Dominance")
