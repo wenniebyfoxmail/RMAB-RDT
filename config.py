@@ -82,6 +82,8 @@ class WhittleConfig:
     lambda_init: float = 10.0
     lambda_max: float = 10000.0
     bracket_expand_factor: float = 2.0
+    # 加速参数
+    n_lambda_coarse: int = 200  # Reduce to 50-100 for faster computation
 
 
 # =============================================================================
@@ -92,14 +94,14 @@ class WhittleConfig:
 class HeterogeneousConfig:
     """
     Configuration for per-arm heterogeneous p_s.
-    
+
     This is the KEY mechanism for Whittle advantage over Myopic.
     """
     enabled: bool = True  # DEFAULT: enabled for v3
-    
+
     # Heterogeneity level: "homogeneous", "low", "medium", "high"
     level: str = "high"
-    
+
     # p_s ranges by level
     ranges: Dict[str, Tuple[float, float]] = field(default_factory=lambda: {
         "homogeneous": (0.50, 0.50),
@@ -107,27 +109,27 @@ class HeterogeneousConfig:
         "medium": (0.25, 0.70),
         "high": (0.20, 0.85),
     })
-    
+
     def get_range(self) -> Tuple[float, float]:
         return self.ranges.get(self.level, (0.20, 0.85))
 
 
-def generate_heterogeneous_p_s(N: int, config: HeterogeneousConfig, 
+def generate_heterogeneous_p_s(N: int, config: HeterogeneousConfig,
                                 seed: int = 42) -> np.ndarray:
     """
     Generate per-arm heterogeneous p_s values.
-    
+
     Args:
         N: Number of arms
         config: Heterogeneous configuration
         seed: Random seed
-        
+
     Returns:
         Array of p_s values, one per arm
     """
     rng = np.random.default_rng(seed)
     p_min, p_max = config.get_range()
-    
+
     if config.level == "homogeneous":
         return np.full(N, 0.50)
     else:
@@ -138,7 +140,7 @@ def generate_heterogeneous_p_s(N: int, config: HeterogeneousConfig,
 # Experiment Configuration
 # =============================================================================
 
-@dataclass 
+@dataclass
 class ExperimentConfig:
     """Configuration for experiments."""
     N: int = 50
@@ -151,7 +153,7 @@ class ExperimentConfig:
     class_distribution: List[int] = field(default_factory=lambda: [25, 25])
     master_seed: int = 42
     R: int = 8
-    
+
     # NEW: Heterogeneous p_s configuration
     heterogeneous: HeterogeneousConfig = field(default_factory=HeterogeneousConfig)
 
@@ -166,7 +168,7 @@ class SimulationConfig:
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
     whittle: WhittleConfig = field(default_factory=WhittleConfig)
     arm_classes: List[ArmClassConfig] = field(default_factory=list)
-    
+
     def __post_init__(self):
         if not self.arm_classes:
             self.arm_classes = get_nhgp_arm_classes(
@@ -237,8 +239,20 @@ def get_ontario_arm_classes(data_dir: str = "data/ontario",
         https://data.ontario.ca/dataset/pavement-condition-for-provincial-highways
     """
     from ontario_data_loader import OntarioDataLoader
+    from pathlib import Path
 
-    loader = OntarioDataLoader(data_dir)
+    # 构建正确的文件路径
+    data_path = Path(data_dir)
+    path_2022 = data_path / "ontario_2022.csv"
+    path_2023 = data_path / "ontario_2023.csv"
+
+    # 检查文件是否存在
+    if not path_2022.exists():
+        raise FileNotFoundError(f"Ontario 2022 data not found: {path_2022}")
+    if not path_2023.exists():
+        raise FileNotFoundError(f"Ontario 2023 data not found: {path_2023}")
+
+    loader = OntarioDataLoader(str(path_2022), str(path_2023))
     result = loader.load_and_process()
 
     # 获取真实转移矩阵（年度）
