@@ -131,7 +131,7 @@ class OptimizedWhittleSolver:
     
     def compute_index_table(self, arm_class: ArmClassConfig,
                             delta_max: int,
-                            verbose: bool = True) -> WhittleIndexTable:
+                            verbose: bool = False) -> WhittleIndexTable:
         """
         Compute Whittle Index table using global λ-sweep.
         

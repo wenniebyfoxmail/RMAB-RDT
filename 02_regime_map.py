@@ -62,7 +62,7 @@ def run_single_config(N: int, M: int, heterogeneity: str, T: int,
     config.experiment.M = M
     config.experiment.delta_max = delta_max
     config.experiment.heterogeneous.level = heterogeneity
-    config.arm_classes = get_nhgp_arm_classes(J=5, R=8, recovery_prob=0.0)  # Main line: 0.0
+    config.arm_classes = get_nhgp_arm_classes(J=5, R=8, recovery_prob=0.02)  # Required for non-zero AoII
 
     burn_in_ratio = 0.3
     seeds = list(range(42, 42 + n_seeds))
