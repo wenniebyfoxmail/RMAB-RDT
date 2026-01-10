@@ -262,10 +262,11 @@ def _run_single_seed(seed: int, config_dict: dict, policy_name: str,
 class ExperimentRunner:
     """Runs RMAB experiments with comprehensive metrics."""
 
-    def __init__(self, output_dir: str = "results"):
+    def __init__(self, output_dir: str = "results", lambda_points: int = 200):
         self.output_dir = Path(output_dir)
         self.data_dir = self.output_dir / "data"
         self.fig_dir = self.output_dir / "figures"
+        self.lambda_points = lambda_points  # For Whittle computation speed
 
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.fig_dir.mkdir(parents=True, exist_ok=True)
@@ -284,6 +285,8 @@ class ExperimentRunner:
                delta_max)
 
         if key not in self._whittle_cache:
+            # Override n_lambda_coarse from instance setting
+            whittle_config.n_lambda_coarse = self.lambda_points
             solver = WhittleSolver(whittle_config)
             self._whittle_cache[key] = solver.compute_all_tables(arm_classes, delta_max, verbose=False)
 
@@ -325,7 +328,7 @@ class ExperimentRunner:
                 delta_array.mean() if len(delta_array) > 0 else 0,
                 np.percentile(delta_array, 90) if len(delta_array) > 0 else 0)
 
-    def run_experiment(self, N: int, M: int, J: int = 5, delta_max: int = 50,
+    def run_experiment(self, N: int, M: int, J: int = 5, delta_max: int = 100,
                        T: int = 2000, R: int = 8, n_seeds: int = 10,
                        p_s_override: float = None,
                        arm_classes: List[ArmClassConfig] = None,
@@ -357,6 +360,8 @@ class ExperimentRunner:
 
         # Override p_s if specified (for stress testing)
         if p_s_override is not None:
+            # CRITICAL FIX: 禁用 heterogeneous 模式，使用统一的 p_s_override
+            config.experiment.heterogeneous.enabled = False
             for ac in config.arm_classes:
                 ac.p_s = p_s_override
 
@@ -444,15 +449,17 @@ class ExperimentRunner:
 class IEEEPlotter:
     """Generates IEEE-format publication figures."""
 
-    def __init__(self, output_dir: str = "results/figures"):
+    def __init__(self, output_dir: str = "results/figures", suffix: str = ""):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.suffix = suffix  # 用于区分不同配置的输出
         setup_ieee_style()
 
     def save_figure(self, fig: plt.Figure, name: str) -> Tuple[str, str]:
         """Save figure in PNG and PDF formats."""
-        png_path = self.output_dir / f"{name}.png"
-        pdf_path = self.output_dir / f"{name}.pdf"
+        full_name = f"{name}{self.suffix}"
+        png_path = self.output_dir / f"{full_name}.png"
+        pdf_path = self.output_dir / f"{full_name}.pdf"
 
         fig.savefig(png_path, format='png', dpi=300, bbox_inches='tight')
         fig.savefig(pdf_path, format='pdf', bbox_inches='tight')
@@ -975,7 +982,8 @@ def run_small_scale_benchmark(output_dir: str = "results") -> pd.DataFrame:
 
 def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
                         use_ontario: bool = False, ontario_dir: str = "data/ontario",
-                        heterogeneous: bool = False):
+                        heterogeneous: bool = False,
+                        delta_max: int = 100, lambda_points: int = 200):
     """
     Run all experiments per advisor requirements.
 
@@ -985,19 +993,30 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
         use_ontario: If True, use real Ontario data instead of NHGP synthetic data
         ontario_dir: Directory containing Ontario CSV files
         heterogeneous: If True, use heterogeneous p_s [0.3, 0.7] to increase gap
+        delta_max: Maximum age delta (reduce for faster computation)
+        lambda_points: Lambda sample points for Whittle (reduce for faster computation)
     """
     if quick_test:
-        T, n_seeds = 300, 2
-        N_values = [20, 50, 100]
-        M_values = [1, 2, 3, 5]
-        ps_values = [0.70, 0.90, 0.996]
-        N_base = 30
+        T, n_seeds = 500, 3
+        N_values = [30, 50, 100]           # 从 N=30 开始，确保 M >= 1
+        M_values = [1, 2, 3, 5]            # 聚焦紧预算 (M/N = 2%-10%)
+        ps_values = [0.70, 0.90, 0.996]    # 增加低 p_s 点
+        N_base = 50
     else:
-        T, n_seeds = 1000, 5
-        N_values = [20, 50, 100, 200]
-        M_values = [1, 2, 3, 5, 10]  # 更多低 M 点
-        ps_values =  [0.50, 0.70, 0.85, 0.95, 0.996]
-        N_base = 80
+        T, n_seeds = 2000, 10
+        N_values = [30, 50, 100, 200]      # 从 N=30 开始
+        M_values = [1, 2, 3, 5, 10]        # 聚焦紧预算，去掉 M=8
+        ps_values = [0.50, 0.70, 0.85, 0.95, 0.996]  # 更宽范围，包含低可靠性
+        N_base = 100
+
+    # Ultra-quick override (for debugging)
+    if delta_max <= 30 and lambda_points <= 50:
+        print("  ⚡⚡ ULTRA-QUICK MODE: Minimal experiment points")
+        T, n_seeds = 200, 2
+        N_values = [20, 50]
+        M_values = [1, 2, 3]               # 紧预算点
+        ps_values = [0.70, 0.90]           # 包含低 p_s
+        N_base = 50
 
     # Determine data source
     data_source = "Ontario Real Data" if use_ontario else "NHGP Synthetic"
@@ -1008,6 +1027,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
     print("  (按导师要求: Fig1-N sweep, Fig2-M sweep, Fig3-p_s sweep)")
     print(f"  📊 Data Source: {data_source}")
     print(f"  📊 p_s Config: {het_status}")
+    print(f"  ⚡ Speed Config: delta_max={delta_max}, lambda_points={lambda_points}")
     print("=" * 70)
     print(f"T={T}, seeds={n_seeds}, burn-in=50%")
     if use_ontario:
@@ -1031,26 +1051,42 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
         for ac in arm_classes_override:
             print(f"  {ac.name}: p_s={ac.p_s:.2f}")
 
-    runner = ExperimentRunner(output_dir)
-    plotter = IEEEPlotter(f"{output_dir}/figures")
+    # 生成配置标识（用于区分不同配置的输出文件）
+    config_suffix = ""
+    if use_ontario:
+        config_suffix = "_ontario"
+    elif heterogeneous:
+        config_suffix = "_het"
+    else:
+        config_suffix = "_homo"
+
+    if quick_test:
+        config_suffix += "_quick"
+    else:
+        config_suffix += "_full"
+
+    print(f"  📁 Output suffix: {config_suffix}")
+
+    runner = ExperimentRunner(output_dir, lambda_points=lambda_points)
+    plotter = IEEEPlotter(f"{output_dir}/figures", suffix=config_suffix)
 
     total_start = time.time()
 
     # =========================================================================
-    # Fig 1: N Sweep
+    # Fig 1: N Sweep (紧预算: M/N = 3%)
     # =========================================================================
     print("\n" + "=" * 60)
     print("EXPERIMENT 1: N SWEEP (Fig 1)")
     print("=" * 60)
 
     fig1_results = {}
-    budget_ratio = 0.03
+    budget_ratio = 0.03  # 3% 紧预算，有利于展示 Whittle 优势
 
     for N in N_values:
         M = max(1, int(N * budget_ratio))
         print(f"\n--- N={N}, M={M} ---")
         fig1_results[N] = runner.run_experiment(
-            N=N, M=M, T=T, n_seeds=n_seeds,
+            N=N, M=M, T=T, n_seeds=n_seeds, delta_max=delta_max,
             arm_classes=arm_classes_override  # Pre-loaded arm classes
         )
 
@@ -1062,7 +1098,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
                 'N': N, 'M': int(N * budget_ratio), 'policy': name,
                 'mean_aoii': r.mean, 'std_aoii': r.std, 'mean_delta': r.mean_delta
             })
-    pd.DataFrame(fig1_data).to_csv(f"{output_dir}/data/fig1_n_sweep.csv", index=False)
+    pd.DataFrame(fig1_data).to_csv(f"{output_dir}/data/fig1_n_sweep{config_suffix}.csv", index=False)
 
     # Plot
     plotter.plot_fig1_n_sweep(fig1_results, budget_ratio)
@@ -1080,7 +1116,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
     for M in M_values:
         print(f"\n--- M={M} (M/N={M/N_base:.1%}) ---")
         fig2_results[M] = runner.run_experiment(
-            N=N_base, M=M, T=T, n_seeds=n_seeds,
+            N=N_base, M=M, T=T, n_seeds=n_seeds, delta_max=delta_max,
             arm_classes=arm_classes_override  # Pre-loaded arm classes
         )
 
@@ -1092,7 +1128,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
                 'N': N_base, 'M': M, 'policy': name,
                 'mean_aoii': r.mean, 'std_aoii': r.std, 'mean_delta': r.mean_delta
             })
-    pd.DataFrame(fig2_data).to_csv(f"{output_dir}/data/fig2_m_sweep.csv", index=False)
+    pd.DataFrame(fig2_data).to_csv(f"{output_dir}/data/fig2_m_sweep{config_suffix}.csv", index=False)
 
     # Plot
     plotter.plot_fig2_m_sweep(fig2_results, N_base)
@@ -1106,12 +1142,13 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
     print("=" * 60)
 
     fig3_results = {}
-    M_fixed = max(1, int(N_base * 0.1))
+    M_fixed = max(1, int(N_base * 0.05))  # 5% 预算，展示 p_s 对 Whittle 优势的影响
 
     for p_s in ps_values:
         print(f"\n--- p_s={p_s} ---")
         fig3_results[p_s] = runner.run_experiment(
-            N=N_base, M=M_fixed, T=T, n_seeds=n_seeds, p_s_override=p_s,
+            N=N_base, M=M_fixed, T=T, n_seeds=n_seeds, delta_max=delta_max,
+            p_s_override=p_s,
             arm_classes=arm_classes_override  # Pre-loaded arm classes
         )
 
@@ -1123,7 +1160,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
                 'p_s': p_s, 'N': N_base, 'M': M_fixed, 'policy': name,
                 'mean_aoii': r.mean, 'std_aoii': r.std, 'mean_delta': r.mean_delta
             })
-    pd.DataFrame(fig3_data).to_csv(f"{output_dir}/data/fig3_ps_sweep.csv", index=False)
+    pd.DataFrame(fig3_data).to_csv(f"{output_dir}/data/fig3_ps_sweep{config_suffix}.csv", index=False)
 
     # Plot
     plotter.plot_fig3_ps_sweep(fig3_results)
@@ -1140,7 +1177,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
     baseline_M = M_values[len(M_values)//2]
     baseline_results = fig2_results.get(baseline_M, fig2_results[M_values[0]])
 
-    table1 = generate_table1(baseline_results, f"{output_dir}/data/table1_summary.csv",
+    table1 = generate_table1(baseline_results, f"{output_dir}/data/table1_summary{config_suffix}.csv",
                             f"N={N_base}, M={baseline_M}")
     print("\n" + table1.to_string(index=False))
 
@@ -1169,8 +1206,8 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
     print("=" * 70)
     print(f"Total time: {total_time/60:.1f} minutes")
     print(f"\nOutput: {output_dir}/")
-    print("  Figures: fig1_n_sweep, fig2_m_sweep, fig3_ps_sweep, fig_delta_dist")
-    print("  Data: fig1_n_sweep.csv, fig2_m_sweep.csv, fig3_ps_sweep.csv, table1_summary.csv")
+    print(f"  Figures: fig1_n_sweep{config_suffix}, fig2_m_sweep{config_suffix}, fig3_ps_sweep{config_suffix}")
+    print(f"  Data: fig1_n_sweep{config_suffix}.csv, fig2_m_sweep{config_suffix}.csv, fig3_ps_sweep{config_suffix}.csv")
     if p1_results is not None:
         print("  P1 Benchmark: p1_optimal_benchmark.csv")
     print("=" * 70)
@@ -1198,6 +1235,11 @@ if __name__ == "__main__":
     # Step 1: Heterogeneous p_s (推荐第一步尝试)
     parser.add_argument('--heterogeneous', action='store_true',
                         help='Use heterogeneous p_s values [0.3, 0.7] to increase Whittle-Myopic gap')
+    # 加速参数
+    parser.add_argument('--delta-max', type=int, default=100,
+                        help='Maximum age delta (default: 100, use 50 for faster computation)')
+    parser.add_argument('--lambda-points', type=int, default=200,
+                        help='Number of lambda sample points for Whittle computation (default: 200, use 50-100 for faster)')
     args = parser.parse_args()
 
     if args.p1_only:
@@ -1205,4 +1247,5 @@ if __name__ == "__main__":
     else:
         run_all_experiments(output_dir=args.output, quick_test=args.quick,
                            use_ontario=args.use_ontario, ontario_dir=args.ontario_dir,
-                           heterogeneous=args.heterogeneous)
+                           heterogeneous=args.heterogeneous,
+                           delta_max=args.delta_max, lambda_points=args.lambda_points)

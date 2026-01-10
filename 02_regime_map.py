@@ -160,7 +160,7 @@ def _run_config_wrapper(args: tuple) -> Dict[str, float]:
 
 
 def generate_regime_map(output_dir: str = "results",
-                        N: int = 50,
+                        N: int = 80,            # 改为 80 以匹配 Fig 2
                         T: int = 500,
                         n_seeds: int = 5,
                         quick_test: bool = False):
@@ -175,12 +175,12 @@ def generate_regime_map(output_dir: str = "results",
     # Define sweep grid
     if quick_test:
         heterogeneities = ["homogeneous", "medium", "high"]
-        budget_ratios = [0.05, 0.10, 0.15]
+        budget_ratios = [0.02, 0.05, 0.10]     # 聚焦紧预算
         T = 300
         n_seeds = 3
     else:
         heterogeneities = ["homogeneous", "low", "medium", "high"]
-        budget_ratios = [0.02, 0.05, 0.10, 0.15, 0.20]
+        budget_ratios = [0.01, 0.02, 0.05, 0.10, 0.15]  # 增加 1% 极紧预算
 
     print("=" * 70)
     print("REGIME MAP v3: Whittle vs Myopic (Heterogeneous p_s)")
