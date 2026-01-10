@@ -987,17 +987,17 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
         heterogeneous: If True, use heterogeneous p_s [0.3, 0.7] to increase gap
     """
     if quick_test:
-        T, n_seeds = 500, 3
-        N_values = [20, 50]
-        M_values = [2, 5, 10]
+        T, n_seeds = 300, 2
+        N_values = [20]
+        M_values = [2, 5]
         ps_values = [0.90, 0.996]
-        N_base = 50
+        N_base = 30
     else:
-        T, n_seeds = 2000, 10
+        T, n_seeds = 1000, 5
         N_values = [20, 50, 100, 200]
         M_values = [1, 2, 3, 5, 8, 10]  # 更多低 M 点
         ps_values = [0.70, 0.80, 0.90, 0.95, 0.996]
-        N_base = 100
+        N_base = 80
 
     # Determine data source
     data_source = "Ontario Real Data" if use_ontario else "NHGP Synthetic"
