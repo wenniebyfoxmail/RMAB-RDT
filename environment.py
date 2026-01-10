@@ -263,75 +263,20 @@ class EpisodeLogger:
         return self.epoch_oracle_aoii.copy()
 
 
-class EpisodeLogger:
-    """Logs episode data for analysis."""
-    
-    def __init__(self, N: int, T: int, detailed: bool = False):
-        self.N = N
-        self.T = T
-        self.detailed = detailed
-        
-        self.epoch_oracle_aoii = np.zeros(T)
-        self.epoch_control_cost = np.zeros(T)
-        self.epoch_n_scheduled = np.zeros(T, dtype=np.int32)
-        self.epoch_n_success = np.zeros(T, dtype=np.int32)
-        
-        if detailed:
-            self.arm_oracle_aoii = np.zeros((T, N))
-            self.arm_h = np.zeros((T, N), dtype=np.int32)
-            self.arm_delta = np.zeros((T, N), dtype=np.int32)
-            self.arm_actions = np.zeros((T, N), dtype=np.int32)
-            self.arm_success = np.zeros((T, N), dtype=np.int32)
-    
-    def log(self, epoch: int, result: StepResult, actions: np.ndarray):
-        """Log data for one epoch."""
-        self.epoch_oracle_aoii[epoch] = result.oracle_aoii.mean()
-        self.epoch_control_cost[epoch] = result.control_costs.mean()
-        self.epoch_n_scheduled[epoch] = actions.sum()
-        self.epoch_n_success[epoch] = result.successes.sum()
-        
-        if self.detailed:
-            self.arm_oracle_aoii[epoch] = result.oracle_aoii
-            self.arm_h[epoch] = result.observations[:, 0]
-            self.arm_delta[epoch] = result.observations[:, 1]
-            self.arm_actions[epoch] = actions
-            self.arm_success[epoch] = result.successes
-    
-    def get_summary(self, burn_in_ratio: float = 0.5) -> Dict[str, float]:
-        """Get summary statistics over evaluation period."""
-        burn_in = int(len(self.epoch_oracle_aoii) * burn_in_ratio)
-        eval_aoii = self.epoch_oracle_aoii[burn_in:]
-        eval_cost = self.epoch_control_cost[burn_in:]
-        
-        return {
-            'mean_oracle_aoii': eval_aoii.mean(),
-            'std_oracle_aoii': eval_aoii.std(),
-            'mean_control_cost': eval_cost.mean(),
-            'std_control_cost': eval_cost.std(),
-            'total_scheduled': self.epoch_n_scheduled.sum(),
-            'total_success': self.epoch_n_success.sum(),
-            'avg_success_rate': self.epoch_n_success.sum() / max(self.epoch_n_scheduled.sum(), 1)
-        }
-    
-    def get_trajectory(self) -> np.ndarray:
-        """Get full AoII trajectory."""
-        return self.epoch_oracle_aoii.copy()
-
-
 if __name__ == "__main__":
     print("=== Environment v3 Test (Heterogeneous p_s) ===")
-    
+
     config = SimulationConfig()
     env = RMABEnvironment(config, seed=42)
-    
+
     print(f"N={env.N}, M={env.M}")
     print(f"p_s range: [{env.p_s_per_arm.min():.3f}, {env.p_s_per_arm.max():.3f}]")
     print(f"p_s std: {env.p_s_per_arm.std():.3f}")
-    
+
     # Test step
     obs = env.reset()
     actions = np.zeros(env.N, dtype=np.int32)
     actions[:env.M] = 1
-    
+
     result = env.step(actions)
     print(f"\nStep result: mean_aoii={result.info['mean_oracle_aoii']:.3f}")
