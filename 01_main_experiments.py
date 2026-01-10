@@ -325,7 +325,7 @@ class ExperimentRunner:
                 delta_array.mean() if len(delta_array) > 0 else 0,
                 np.percentile(delta_array, 90) if len(delta_array) > 0 else 0)
 
-    def run_experiment(self, N: int, M: int, J: int = 5, delta_max: int = 100,
+    def run_experiment(self, N: int, M: int, J: int = 5, delta_max: int = 50,
                        T: int = 2000, R: int = 8, n_seeds: int = 10,
                        p_s_override: float = None,
                        arm_classes: List[ArmClassConfig] = None,

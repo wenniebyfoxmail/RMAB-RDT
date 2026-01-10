@@ -63,7 +63,7 @@ class OptimizedWhittleSolver:
         # λ sweep parameters - EXPANDED based on audit (45%+ states hit boundary)
         self.lambda_min = -100.0
         self.lambda_max = 2000.0   # Expanded 4x from 500
-        self.n_lambda_coarse = 200  # Increased density for accuracy
+        self.n_lambda_coarse = 100  # Increased density for accuracy
         self.skip_fine_refinement = True  # Skip slow per-state refinement
     
     def solve_vi_vectorized(self, lam: float, J: int, delta_max: int,
