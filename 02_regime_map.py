@@ -178,8 +178,8 @@ def generate_regime_map(output_dir: str = "results",
 
     # Define sweep grid
     if quick_test:
-        heterogeneities = ["homogeneous", "medium", "high"]
-        budget_ratios = [0.02, 0.05, 0.10]     # 聚焦紧预算
+        heterogeneities = ["homogeneous", "medium", "high"]  # 3个（省略 low）
+        budget_ratios = [0.01, 0.02, 0.05, 0.10]  # 4个（加入 1%）
         T = 300
         n_seeds = 3
     else:
