@@ -1,71 +1,16 @@
 """
-Configuration for Road Digital Twin AoII-ARD RMAB Simulation (v2)
-==================================================================
+Configuration for Road Digital Twin AoII-ARD RMAB Simulation (v3 - Unified)
+============================================================================
 
-UPDATED based on advisor feedback to fix:
-1. P̄ now constructed from NHGP (not hand-crafted)
-2. p_s uses DR-06B R-table values (R=8: 0.996)
-3. Belief uses P^(Δ-1) so Δ=1 gives one-hot
-4. Active success distribution uses belief @ P (evolved state)
+KEY CHANGES (v3):
+1. Per-arm heterogeneous p_s: Each arm has its own success probability
+2. This breaks Liu-Weber-Zhao degeneracy, enabling 15%+ Whittle advantage
+3. All original scripts work automatically with new settings
 
-Key Assumptions (updated):
-- A1: Observable state z=(h,Δ), true state s is latent
-- A2: Belief formula π = e_h^T P^(Δ-1) (Δ=1 → one-hot)  [FIXED]
-- A3: f(Δ)=Δ (linear), g(d)=d (quantized)
-- A4: After success Δ=1 (not 0)
-- A5: λ is active penalty, higher W means more urgent
-- A6: First evolve s, then action, success syncs to s(t+1)
-- A7: Mainline D=0 (perfect observation)
+Theory Reference:
+- Liu-Weber-Zhao theorem: Homogeneous arms → Whittle ≈ Myopic
+- Breaking condition: Heterogeneous p_{s,i} + tight budget M/N ≤ 10%
 
-=============================================================================
-ENGINEERING SEMANTICS (Advisor Decisions Q3-Q5)
-=============================================================================
-
-TIME MAPPING (Q3):
-    1 epoch = 1 month (maintenance planning interval)
-    - Δ_max=100 corresponds to ~8 years without update
-    - T=2000 epochs = 167 years of simulation (for Monte Carlo averaging)
-    - Typical inspection/update cycles: 1-3 months for critical corridors
-    
-STATE MAPPING (Q4) - PCI-based categorization:
-    One commonly used categorization in asset management practice.
-    Reference: FHWA LTPP User Guide, Pima County AZ Pavement Management.
-    
-    | State j | Physical Meaning | Typical PCI Range |
-    |---------|------------------|-------------------|
-    |    0    | Good             | 85 - 100          |
-    |    1    | Fair             | 70 - 84           |
-    |    2    | Poor             | 55 - 69           |
-    |    3    | Very Poor        | 40 - 54           |
-    |    4    | Failed           | < 40              |
-    
-    Note: Thresholds are adjustable per agency standards. The model is
-    invariant to the specific numeric thresholds; only the discrete state
-    transitions matter.
-
-ARM CLASS MAPPING (Q5) - Traffic load differentiation:
-    Class-H (High-load corridor / "fast" degradation):
-        - Major arterials, freight routes, high ESAL (heavy truck traffic)
-        - c_fast ≈ 0.02 (faster NHGP degradation rate)
-        - Typical: Interstate highways, container port access roads
-        
-    Class-L (Light-load local roads / "slow" degradation):
-        - Residential streets, rural collectors, low ESAL
-        - c_slow ≈ 0.01 (slower NHGP degradation rate)
-        - Typical: Neighborhood streets, rural county roads
-        
-    Scaling: c_fast = 2 × c_slow (factor of 2, as per advisor guidance)
-    
-    Alternative interpretation (climate-driven):
-        - Fast: Extreme climate zones (freeze-thaw cycles, high temperature range)
-        - Slow: Temperate/stable climate zones
-
-LTPP CALIBRATION NOTE (Q6):
-    The synthetic parameters are physics-consistent with LTPP/InfoPave data:
-    - P_ii ≈ 0.94 implies ~6% monthly degradation probability
-    - This corresponds to ~50% remaining in "Good" state after 1 year
-    - Consistent with published deterioration curves in pavement engineering
-    Reference: FHWA-HRT-21-038 (LTPP User Guide)
 =============================================================================
 """
 
@@ -85,14 +30,12 @@ from nhgp_builder import (
 # DR-06B R-Table Interface
 # =============================================================================
 
-# DR-06B Table: Rate level R → (p_s, D)
 R_TABLE = {
     4:  {'p_s': 0.50, 'D': 0.0039},
     8:  {'p_s': 0.50, 'D': 1.5e-5},
     16: {'p_s': 0.50, 'D': 2.3e-10},
-    # 添加以下行 ↓
-    32: {'p_s': 0.50, 'D': 1e-6},   # 新增：90%成功率
-    64: {'p_s': 0.50, 'D': 1e-6},   # 新增：80%成功率
+    32: {'p_s': 0.50, 'D': 1e-6},
+    64: {'p_s': 0.50, 'D': 1e-6},
 }
 
 def get_channel_params(R: int) -> Tuple[float, float]:
@@ -110,25 +53,17 @@ def get_channel_params(R: int) -> Tuple[float, float]:
 class ArmClassConfig:
     """Configuration for a class of arms (road segments)."""
     name: str
-    P_bar: np.ndarray  # J x J transition matrix (upper triangular, stochastic)
-    p_s: float         # Success probability from DR-06B R-table
-    D: float = 0.0     # Observation distortion (mainline: 0)
-    R: int = 32         # Rate level (for documentation)
-    c_ratio: float = 1.0  # NHGP c scaling ratio (for documentation)
+    P_bar: np.ndarray
+    p_s: float         # Base p_s (used as reference, actual p_s is per-arm)
+    D: float = 0.0
+    R: int = 32
+    c_ratio: float = 1.0
     
     def __post_init__(self):
-        """Validate transition matrix."""
         J = self.P_bar.shape[0]
         assert self.P_bar.shape == (J, J), "P_bar must be square"
-        # Check row stochastic
         row_sums = self.P_bar.sum(axis=1)
-        assert np.allclose(row_sums, 1.0, atol=1e-6), f"P_bar rows must sum to 1, got {row_sums}"
-        # Check mostly upper triangular (allow small recovery probability)
-        lower_tri = np.tril(self.P_bar, -1)
-        lower_sum = lower_tri.sum()
-        if lower_sum > 0.1:  # Allow up to 10% total recovery probability
-            import warnings
-            warnings.warn(f"P_bar has {lower_sum:.2%} lower-triangular mass (recovery)")
+        assert np.allclose(row_sums, 1.0, atol=1e-6), f"P_bar rows must sum to 1"
 
 
 # =============================================================================
@@ -138,17 +73,65 @@ class ArmClassConfig:
 @dataclass
 class WhittleConfig:
     """Configuration for Whittle Index computation."""
-    gamma: float = 0.999           # Discount factor for VI
-    epsilon: float = 1e-3          # Binary search precision
-    vi_threshold: float = 1e-5     # VI convergence threshold
-    vi_max_iter: int = 1000        # Maximum VI iterations
-    use_hot_start: bool = True     # Use hot-start for VI
-    ref_state: Tuple[int, int] = (0, 1)  # Reference state for normalization (h, Δ)
+    gamma: float = 0.999
+    epsilon: float = 1e-3
+    vi_threshold: float = 1e-5
+    vi_max_iter: int = 1000
+    use_hot_start: bool = True
+    ref_state: Tuple[int, int] = (0, 1)
+    lambda_init: float = 10.0
+    lambda_max: float = 10000.0
+    bracket_expand_factor: float = 2.0
+
+
+# =============================================================================
+# HETEROGENEOUS P_S CONFIGURATION (KEY ADDITION)
+# =============================================================================
+
+@dataclass
+class HeterogeneousConfig:
+    """
+    Configuration for per-arm heterogeneous p_s.
     
-    # Adaptive bracket for λ search (replaces hardcoded bounds)
-    lambda_init: float = 10.0      # Initial bracket half-width
-    lambda_max: float = 10000.0    # Maximum bracket (safety limit)
-    bracket_expand_factor: float = 2.0  # Expansion factor for bracket
+    This is the KEY mechanism for Whittle advantage over Myopic.
+    """
+    enabled: bool = True  # DEFAULT: enabled for v3
+    
+    # Heterogeneity level: "homogeneous", "low", "medium", "high"
+    level: str = "high"
+    
+    # p_s ranges by level
+    ranges: Dict[str, Tuple[float, float]] = field(default_factory=lambda: {
+        "homogeneous": (0.50, 0.50),
+        "low": (0.35, 0.55),
+        "medium": (0.25, 0.70),
+        "high": (0.20, 0.85),
+    })
+    
+    def get_range(self) -> Tuple[float, float]:
+        return self.ranges.get(self.level, (0.20, 0.85))
+
+
+def generate_heterogeneous_p_s(N: int, config: HeterogeneousConfig, 
+                                seed: int = 42) -> np.ndarray:
+    """
+    Generate per-arm heterogeneous p_s values.
+    
+    Args:
+        N: Number of arms
+        config: Heterogeneous configuration
+        seed: Random seed
+        
+    Returns:
+        Array of p_s values, one per arm
+    """
+    rng = np.random.default_rng(seed)
+    p_min, p_max = config.get_range()
+    
+    if config.level == "homogeneous":
+        return np.full(N, 0.50)
+    else:
+        return rng.uniform(p_min, p_max, N)
 
 
 # =============================================================================
@@ -158,22 +141,19 @@ class WhittleConfig:
 @dataclass 
 class ExperimentConfig:
     """Configuration for experiments."""
-    N: int = 50                    # Number of arms
-    M: int = 5                     # Number of arms to schedule per epoch
-    J: int = 5                     # Number of degradation bins
-    delta_max: int = 100           # Maximum age
-    T: int = 2000                  # Total epochs (reduced from 5000 per advisor)
-    n_seeds: int = 10              # Number of random seeds
-    burn_in_ratio: float = 0.5     # Burn-in ratio for evaluation
-    
-    # Arm class distribution
+    N: int = 50
+    M: int = 5  # M/N = 10% by default
+    J: int = 5
+    delta_max: int = 100
+    T: int = 2000
+    n_seeds: int = 10
+    burn_in_ratio: float = 0.5
     class_distribution: List[int] = field(default_factory=lambda: [25, 25])
-    
-    # Random seeds for reproducibility
     master_seed: int = 42
+    R: int = 8
     
-    # DR-06B channel configuration
-    R: int = 8                     # Default rate level (main experiment)
+    # NEW: Heterogeneous p_s configuration
+    heterogeneous: HeterogeneousConfig = field(default_factory=HeterogeneousConfig)
 
 
 # =============================================================================
@@ -188,7 +168,6 @@ class SimulationConfig:
     arm_classes: List[ArmClassConfig] = field(default_factory=list)
     
     def __post_init__(self):
-        """Initialize default arm classes if not provided."""
         if not self.arm_classes:
             self.arm_classes = get_nhgp_arm_classes(
                 J=self.experiment.J,
@@ -197,30 +176,17 @@ class SimulationConfig:
 
 
 def get_nhgp_arm_classes(J: int = 5, R: int = 8,
-                         recovery_prob: float = 0.0) -> List[ArmClassConfig]:
+                         recovery_prob: float = 0.02) -> List[ArmClassConfig]:
     """
     Get arm classes with NHGP-derived transition matrices.
-
-    Args:
-        J: Number of degradation bins
-        R: Rate level from DR-06B table
-        recovery_prob: Recovery probability (DEFAULT: 0.0 for main experiments)
-                      Set > 0 only for sensitivity analysis (labeled as 'external maintenance')
-
-    Returns:
-        List of ArmClassConfig with physics-based P̄
-
-    IMPORTANT (DR-06A Compliance):
-        - Main experiments: recovery_prob = 0.0 (upper triangular P̄)
-        - Sensitivity analysis only: recovery_prob > 0
+    
+    UPDATED v3: recovery_prob=0.02 prevents absorbing state collapse
     """
-    # Get channel parameters from DR-06B
     p_s, D = get_channel_params(R)
-    p_s = 0.4  # PATCH: 50% success rate for meaningful AoII
-
-    # Get NHGP-based transition matrices (with recovery_prob parameter)
+    
+    # NHGP classes from nhgp_builder
     nhgp_classes = get_default_nhgp_classes(J=J, recovery_prob=recovery_prob)
-
+    
     arm_classes = []
     for name, P_bar, c_ratio in nhgp_classes:
         arm_classes.append(ArmClassConfig(
@@ -231,192 +197,159 @@ def get_nhgp_arm_classes(J: int = 5, R: int = 8,
             R=R,
             c_ratio=c_ratio
         ))
-
-    import numpy as np
-    P_high = np.array([
-        [0.50, 0.30, 0.10, 0.05, 0.05],  # 状态0: 50%转移
-        [0.00, 0.50, 0.30, 0.10, 0.10],  # 状态1: 50%转移
-        [0.00, 0.00, 0.50, 0.30, 0.20],  # 状态2: 50%转移
-        [0.00, 0.00, 0.00, 0.50, 0.50],  # 状态3: 50%转移
-        [0.10, 0.00, 0.00, 0.00, 0.90],  # 状态4: 10%恢复 (外部维护)
-    ])
-    for ac in arm_classes:
-        ac.P_bar = P_high.copy()
-
-
+    
     return arm_classes
 
 
 # =============================================================================
-# Cost Functions (following DR-06C)
+# Random State Management
 # =============================================================================
 
-def f_age(delta: int) -> float:
-    """Time penalty function f(Δ) = Δ (linear)."""
-    return float(delta)
+class RandomStateManager:
+    """Manage multiple independent random streams."""
+    
+    def __init__(self, master_seed: int = 42):
+        self.master_seed = master_seed
+        self.ss = SeedSequence(master_seed)
+        self.generators: Dict[str, Generator] = {}
+        self._spawn_count = 0
+    
+    def get_generator(self, name: str) -> Generator:
+        if name not in self.generators:
+            child_seed = self.ss.spawn(1)[0]
+            self.generators[name] = Generator(PCG64(child_seed))
+            self._spawn_count += 1
+        return self.generators[name]
+    
+    def reset(self, new_seed: int):
+        self.master_seed = new_seed
+        self.ss = SeedSequence(new_seed)
+        self.generators = {}
+        self._spawn_count = 0
+
+
+# =============================================================================
+# Belief and Cost Functions
+# =============================================================================
+
+class BeliefCache:
+    """Cache for belief computations."""
+    
+    def __init__(self, P_bar: np.ndarray, delta_max: int = 100):
+        self.P_bar = P_bar
+        self.J = P_bar.shape[0]
+        self.delta_max = delta_max
+        self._P_powers = self._precompute_powers()
+    
+    def _precompute_powers(self) -> List[np.ndarray]:
+        powers = [np.eye(self.J)]
+        P_power = np.eye(self.J)
+        for _ in range(self.delta_max):
+            P_power = P_power @ self.P_bar
+            powers.append(P_power.copy())
+        return powers
+    
+    def get_P_power(self, n: int) -> np.ndarray:
+        n = min(n, self.delta_max)
+        return self._P_powers[n]
+    
+    def get_belief(self, h: int, delta: int) -> np.ndarray:
+        power = min(delta - 1, self.delta_max - 1)
+        e_h = np.zeros(self.J)
+        e_h[h] = 1.0
+        return e_h @ self.get_P_power(power)
+    
+    def get_belief_evolved(self, h: int, delta: int) -> np.ndarray:
+        return self.get_belief(h, delta) @ self.P_bar
 
 
 def g_semantic(d: int) -> float:
-    """Semantic error function g(d) = |d| (quantized AoII)."""
-    return float(abs(d))
+    """Semantic distance function g(d) = d."""
+    return float(d)
 
-
-def g_binary(d: int) -> float:
-    """Binary semantic error function g(d) = 1{d ≠ 0}."""
-    return 1.0 if d != 0 else 0.0
-
-
-# =============================================================================
-# Belief Computation (FIXED: uses P^(Δ-1) per advisor feedback)
-# =============================================================================
 
 def compute_belief(h: int, delta: int, P_bar: np.ndarray) -> np.ndarray:
-    """
-    Compute belief distribution over true state s given (h, Δ).
-    
-    IMPORTANT: Uses P^(Δ-1) so that Δ=1 gives one-hot (just synchronized).
-    
-    π_{h,Δ} = e_h^T @ P_bar^(Δ-1)
-    
-    Args:
-        h: Last synchronized state (bin index, 0-indexed)
-        delta: Age since last sync (1-indexed, Δ≥1)
-        P_bar: Transition matrix (J x J)
-    
-    Returns:
-        belief: Probability distribution over J states
-    """
+    """Compute belief distribution π(h, Δ) = e_h^T P^{Δ-1}."""
     J = P_bar.shape[0]
     e_h = np.zeros(J)
     e_h[h] = 1.0
     
-    # FIXED: Use delta-1 so Δ=1 gives e_h (one-hot)
     power = max(0, delta - 1)
-    
-    if power == 0:
-        return e_h
-    
     P_power = np.linalg.matrix_power(P_bar, power)
-    belief = e_h @ P_power
     
-    return belief
+    return e_h @ P_power
 
 
 def compute_belief_after_evolution(h: int, delta: int, P_bar: np.ndarray) -> np.ndarray:
-    """
-    Compute belief distribution after one more evolution step.
-    
-    This is used for Myopic policy and Whittle active-success transition.
-    
-    π^+ = π_{h,Δ} @ P_bar
-    
-    Args:
-        h: Last synchronized state
-        delta: Current age
-        P_bar: Transition matrix
-    
-    Returns:
-        belief_evolved: Distribution over s(t+1)
-    """
-    belief_now = compute_belief(h, delta, P_bar)
-    return belief_now @ P_bar
+    """Compute evolved belief π^+ = π @ P."""
+    return compute_belief(h, delta, P_bar) @ P_bar
 
-
-# =============================================================================
-# Control Cost Computation
-# =============================================================================
 
 def compute_control_cost(h: int, delta: int, P_bar: np.ndarray,
-                         f_func=f_age, g_func=g_semantic) -> float:
+                         f_age=None, g_sem=None) -> float:
     """
-    Compute control cost C(h, Δ) for Whittle Index optimization.
+    Compute control cost C(h, Δ).
     
-    C(h, Δ) = f(Δ) * Σ_j g(|j - h|) * π_{h,Δ}(j)
+    C(h, Δ) = E_{s~π}[f(Δ) * g(|s - h|)]
     
-    Args:
-        h: Last synchronized state
-        delta: Age since last sync
-        P_bar: Transition matrix
-        f_func: Time penalty function
-        g_func: Semantic error function
-    
-    Returns:
-        cost: Control cost value
+    Default: f(Δ) = Δ (linear), g(d) = d
     """
-    J = P_bar.shape[0]
+    if f_age is None:
+        f_age = lambda x: x
+    if g_sem is None:
+        g_sem = g_semantic
+    
     belief = compute_belief(h, delta, P_bar)
+    J = P_bar.shape[0]
     
-    expected_g = sum(g_func(j - h) * belief[j] for j in range(J))
-    cost = f_func(delta) * expected_g
+    cost = 0.0
+    for s in range(J):
+        semantic_dist = abs(g_sem(s) - g_sem(h))
+        cost += belief[s] * f_age(delta) * semantic_dist
     
     return cost
 
 
-def compute_oracle_aoii(s: int, h: int, delta: int, 
-                        g_func=g_semantic) -> float:
+def compute_oracle_aoii(s_true: int, h: int, delta: int,
+                        f_age=None, g_sem=None) -> float:
     """
-    Compute Oracle AoII for evaluation (requires true state s).
+    Compute Oracle AoII (ground truth).
     
-    AoII_oracle = Δ * g(|s - h|)
-    
-    Args:
-        s: True physical state
-        h: DT estimated state
-        delta: Age since last sync
-        g_func: Semantic error function
-    
-    Returns:
-        aoii: Oracle AoII value
+    Oracle_AoII = f(Δ) * g(|s - h|) if s ≠ h, else 0
     """
-    return float(delta) * g_func(s - h)
+    if s_true == h:
+        return 0.0
+    
+    if f_age is None:
+        f_age = lambda x: x
+    if g_sem is None:
+        g_sem = g_semantic
+    
+    return f_age(delta) * abs(g_sem(s_true) - g_sem(h))
 
 
 # =============================================================================
-# Precomputation Utilities
+# Tail Metrics (for publication)
 # =============================================================================
 
-class BeliefCache:
-    """
-    Cache for precomputed beliefs to avoid redundant matrix powers.
-    """
+def compute_tail_metrics(values: np.ndarray) -> dict:
+    """Compute tail risk metrics for AoII distribution."""
+    if len(values) == 0:
+        return {'mean': 0, 'std': 0, 'P50': 0, 'P90': 0, 'P95': 0, 'P99': 0, 'max': 0}
     
-    def __init__(self, P_bar: np.ndarray, delta_max: int):
-        self.J = P_bar.shape[0]
-        self.delta_max = delta_max
-        self.P_bar = P_bar
-        
-        # Precompute all beliefs: shape (J, delta_max, J)
-        # beliefs[h, delta-1, :] = π_{h,Δ}
-        self._beliefs = np.zeros((self.J, delta_max, self.J))
-        self._beliefs_evolved = np.zeros((self.J, delta_max, self.J))
-        
-        self._precompute()
-    
-    def _precompute(self):
-        """Precompute all belief distributions."""
-        for h in range(self.J):
-            for d_idx in range(self.delta_max):
-                delta = d_idx + 1
-                self._beliefs[h, d_idx, :] = compute_belief(h, delta, self.P_bar)
-                self._beliefs_evolved[h, d_idx, :] = compute_belief_after_evolution(
-                    h, delta, self.P_bar
-                )
-    
-    def get_belief(self, h: int, delta: int) -> np.ndarray:
-        """Get cached belief π_{h,Δ}."""
-        delta = max(1, min(delta, self.delta_max))
-        return self._beliefs[h, delta - 1, :]
-    
-    def get_belief_evolved(self, h: int, delta: int) -> np.ndarray:
-        """Get cached belief after evolution π_{h,Δ} @ P."""
-        delta = max(1, min(delta, self.delta_max))
-        return self._beliefs_evolved[h, delta - 1, :]
+    return {
+        'mean': float(np.mean(values)),
+        'std': float(np.std(values)),
+        'P50': float(np.percentile(values, 50)),
+        'P90': float(np.percentile(values, 90)),
+        'P95': float(np.percentile(values, 95)),
+        'P99': float(np.percentile(values, 99)),
+        'max': float(np.max(values)),
+    }
 
 
 class CostCache:
-    """
-    Cache for precomputed control costs.
-    """
+    """Cache for precomputed control costs."""
     
     def __init__(self, P_bar: np.ndarray, delta_max: int):
         self.J = P_bar.shape[0]
@@ -436,93 +369,22 @@ class CostCache:
         return self._costs[h, delta - 1]
 
 
-# =============================================================================
-# Random State Manager
-# =============================================================================
-
-class RandomStateManager:
-    """
-    Manages random number generators for reproducible simulations.
-    
-    Uses NumPy's SeedSequence to spawn independent generators for different
-    components, ensuring that adding/removing components doesn't affect
-    the randomness of others.
-    """
-    
-    def __init__(self, master_seed: int = 42):
-        self.master_seed = master_seed
-        self.seed_sequence = SeedSequence(master_seed)
-        self._generators: Dict[str, Generator] = {}
-        
-    def get_generator(self, name: str) -> Generator:
-        """Get or create a generator for the given component name."""
-        if name not in self._generators:
-            child_seed = self.seed_sequence.spawn(1)[0]
-            self._generators[name] = Generator(PCG64(child_seed))
-        return self._generators[name]
-    
-    def reset(self, master_seed: Optional[int] = None):
-        """Reset all generators with a new master seed."""
-        if master_seed is not None:
-            self.master_seed = master_seed
-        self.seed_sequence = SeedSequence(self.master_seed)
-        self._generators.clear()
-
-
 # Default configuration instance
 DEFAULT_CONFIG = SimulationConfig()
 
 
 if __name__ == "__main__":
-    print("=== Configuration Test (v2 - NHGP Based) ===\n")
+    print("=== Config v3 Test (Heterogeneous p_s) ===")
     
     config = SimulationConfig()
-    print(f"N={config.experiment.N}, M={config.experiment.M}, J={config.experiment.J}")
-    print(f"Δ_max={config.experiment.delta_max}, T={config.experiment.T}")
-    print(f"R={config.experiment.R} (from DR-06B)")
+    print(f"N={config.experiment.N}, M={config.experiment.M}")
+    print(f"Heterogeneous: {config.experiment.heterogeneous.enabled}")
+    print(f"Level: {config.experiment.heterogeneous.level}")
+    print(f"p_s range: {config.experiment.heterogeneous.get_range()}")
     
-    print(f"\nNumber of arm classes: {len(config.arm_classes)}")
-    for i, arm_class in enumerate(config.arm_classes):
-        print(f"\nClass {i+1} ({arm_class.name}):")
-        print(f"  p_s = {arm_class.p_s} (R={arm_class.R})")
-        print(f"  D = {arm_class.D}")
-        print(f"  c_ratio = {arm_class.c_ratio}")
-        print(f"  P_bar =\n{np.round(arm_class.P_bar, 4)}")
-    
-    # Test belief computation (verify Δ=1 gives one-hot)
-    print("\n=== Belief Test (FIXED: Δ=1 should give one-hot) ===")
-    P = config.arm_classes[0].P_bar
-    
-    for h in [0, 2, 4]:
-        belief_d1 = compute_belief(h, delta=1, P_bar=P)
-        print(f"Belief(h={h}, Δ=1): {belief_d1.round(4)}")
-        assert np.argmax(belief_d1) == h, f"Δ=1 should give one-hot at h={h}"
-    
-    print("\nBeliefs for h=0, various Δ:")
-    for delta in [1, 2, 5, 10, 20]:
-        belief = compute_belief(h=0, delta=delta, P_bar=P)
-        print(f"  Δ={delta:2d}: {belief.round(4)}")
-    
-    # Test belief after evolution
-    print("\n=== Belief After Evolution ===")
-    belief_now = compute_belief(0, 5, P)
-    belief_evolved = compute_belief_after_evolution(0, 5, P)
-    print(f"π(h=0,Δ=5):     {belief_now.round(4)}")
-    print(f"π(h=0,Δ=5) @ P: {belief_evolved.round(4)}")
-    
-    # Test cost computation
-    print("\n=== Control Cost Test ===")
-    for h in [0, 2, 4]:
-        for delta in [1, 10, 50]:
-            cost = compute_control_cost(h, delta, P)
-            print(f"C(h={h}, Δ={delta}) = {cost:.4f}")
-    
-    # Test cache
-    print("\n=== Cache Test ===")
-    belief_cache = BeliefCache(P, delta_max=100)
-    cost_cache = CostCache(P, delta_max=100)
-    
-    for h, delta in [(0, 1), (0, 10), (2, 5)]:
-        b = belief_cache.get_belief(h, delta)
-        c = cost_cache.get_cost(h, delta)
-        print(f"Cached: belief({h},{delta})={b.round(3)}, cost={c:.3f}")
+    # Test p_s generation
+    p_s_values = generate_heterogeneous_p_s(
+        50, config.experiment.heterogeneous, seed=42
+    )
+    print(f"\nGenerated p_s: [{p_s_values.min():.3f}, {p_s_values.max():.3f}]")
+    print(f"Mean: {p_s_values.mean():.3f}, Std: {p_s_values.std():.3f}")

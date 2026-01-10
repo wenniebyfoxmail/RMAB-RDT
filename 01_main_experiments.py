@@ -49,7 +49,7 @@ from environment import RMABEnvironment, EpisodeLogger
 from whittle_solver import WhittleSolver, WhittleIndexTable
 from policies import (
     BasePolicy, WhittlePolicy, MaxAgePolicy, 
-    MyopicPolicy, RandomPolicy
+    MyopicPolicy, RandomPolicy, WorstStatePolicy
 )
 from parallel_utils import get_optimal_workers, parallel_map, get_cpu_count
 
@@ -94,6 +94,7 @@ POLICY_STYLES = {
     'MaxAge': {'color': '#ff7f0e', 'marker': 's', 'linestyle': '--'},
     'Myopic': {'color': '#2ca02c', 'marker': '^', 'linestyle': '-.'},
     'Random': {'color': '#d62728', 'marker': 'x', 'linestyle': ':'},
+    'WorstState': {'color': '#9467bd', 'marker': 'd', 'linestyle': '--'},
 }
 
 
@@ -218,6 +219,8 @@ def _run_single_seed(seed: int, config_dict: dict, policy_name: str,
         policy = MyopicPolicy()
     elif policy_name == 'Random':
         policy = RandomPolicy(seed=seed)
+    elif policy_name == 'WorstState':
+        policy = WorstStatePolicy()
     else:
         raise ValueError(f"Unknown policy: {policy_name}")
     

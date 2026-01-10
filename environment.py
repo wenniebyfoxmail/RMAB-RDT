@@ -1,15 +1,17 @@
 """
-Environment for Road Digital Twin AoII-ARD RMAB Simulation (v2)
-================================================================
+Environment for Road Digital Twin AoII-ARD RMAB Simulation (v3 - Unified)
+=========================================================================
 
-UPDATED based on advisor feedback:
-- reset(new_seed) now reassigns arm-class mapping for proper Monte Carlo
+KEY CHANGES (v3):
+1. Per-arm heterogeneous p_s: self.p_s_per_arm[i] for each arm
+2. Automatically generates heterogeneous p_s from config
+3. Maintains backward compatibility with original interface
 
 Environment Step Order (per DR-07):
-1. For all arms: s_i(t+1) ~ Categorical(P_bar[s_i(t),:])  # Restless evolution FIRST
+1. For all arms: s_i(t+1) ~ Categorical(P_bar[s_i(t),:])
 2. If a_i=0: Δ ← min(Δ+1, Δ_max)
    If a_i=1:
-     - Success w.p. p_s: h ← s_i(t+1), Δ ← 1  # Sync to EVOLVED state
+     - Success w.p. p_s_i: h ← s_i(t+1), Δ ← 1
      - Failure: Δ ← min(Δ+1, Δ_max)
 """
 
@@ -20,51 +22,43 @@ from numpy.random import Generator, PCG64, SeedSequence
 
 from config import (
     SimulationConfig, ArmClassConfig, RandomStateManager,
-    compute_oracle_aoii, compute_control_cost, g_semantic
+    compute_oracle_aoii, compute_control_cost, g_semantic,
+    generate_heterogeneous_p_s
 )
 
 
 @dataclass
 class ArmState:
     """State of a single arm (road segment)."""
-    s_true: int      # True physical state (latent, for Oracle)
-    h: int           # DT estimated state (last sync value)
-    delta: int       # Age since last successful update
-    class_idx: int   # Index of arm class
+    s_true: int      # True physical state (latent)
+    h: int           # DT estimated state
+    delta: int       # Age since last sync
+    class_idx: int   # Arm class index
+    p_s: float       # Per-arm success probability (NEW in v3)
     
     def get_observable(self) -> Tuple[int, int]:
-        """Return observable state (h, Δ)."""
         return (self.h, self.delta)
 
 
 @dataclass
 class StepResult:
     """Result of a single environment step."""
-    observations: np.ndarray      # Shape (N, 2): (h, Δ) for each arm
-    oracle_aoii: np.ndarray       # Shape (N,): Oracle AoII for each arm
-    control_costs: np.ndarray     # Shape (N,): Control costs for each arm
-    successes: np.ndarray         # Shape (N,): Success flags for scheduled arms
-    rewards: float                # Negative sum of Oracle AoII (for RL interface)
-    info: Dict[str, Any]          # Additional info
+    observations: np.ndarray
+    oracle_aoii: np.ndarray
+    control_costs: np.ndarray
+    successes: np.ndarray
+    rewards: float
+    info: Dict[str, Any]
 
 
 class RMABEnvironment:
     """
-    Restless Multi-Armed Bandit Environment for Road Digital Twin.
+    Restless Multi-Armed Bandit Environment (v3 - Heterogeneous p_s).
     
-    Maintains N arms, each with:
-    - True state s (latent, for Oracle evaluation)
-    - Observable state (h, Δ) for scheduling
+    KEY CHANGE: Each arm has its own p_s value (self.p_s_per_arm).
     """
     
     def __init__(self, config: SimulationConfig, seed: int = 42):
-        """
-        Initialize the RMAB environment.
-        
-        Args:
-            config: Simulation configuration
-            seed: Random seed for reproducibility
-        """
         self.config = config
         self.N = config.experiment.N
         self.M = config.experiment.M
@@ -72,14 +66,17 @@ class RMABEnvironment:
         self.delta_max = config.experiment.delta_max
         self.arm_classes = config.arm_classes
         
-        # Initialize random state manager
+        # Initialize random state
         self.rng_manager = RandomStateManager(seed)
         self.rng_physics = self.rng_manager.get_generator("physics")
         self.rng_channel = self.rng_manager.get_generator("channel")
         self.rng_structure = self.rng_manager.get_generator("structure")
         
-        # Assign arms to classes based on distribution
+        # Assign arm classes
         self.arm_class_indices = self._assign_arm_classes()
+        
+        # NEW v3: Generate per-arm heterogeneous p_s
+        self.p_s_per_arm = self._generate_p_s(seed)
         
         # Initialize arm states
         self.arms: List[ArmState] = []
@@ -87,59 +84,54 @@ class RMABEnvironment:
         
         self._initialize_arms()
     
+    def _generate_p_s(self, seed: int) -> np.ndarray:
+        """Generate per-arm heterogeneous p_s values."""
+        het_config = self.config.experiment.heterogeneous
+        
+        if het_config.enabled:
+            return generate_heterogeneous_p_s(self.N, het_config, seed)
+        else:
+            # Fallback: use class-level p_s
+            p_s_values = np.zeros(self.N)
+            for i in range(self.N):
+                class_idx = self.arm_class_indices[i]
+                p_s_values[i] = self.arm_classes[class_idx].p_s
+            return p_s_values
+    
     def _assign_arm_classes(self) -> np.ndarray:
-        """Assign each arm to a class based on configuration."""
-        distribution = self.config.experiment.class_distribution
-        n_classes = len(self.arm_classes)
+        """Assign each arm to a class (30% slow, 70% fast)."""
+        slow_ratio = 0.30
+        n_slow = int(self.N * slow_ratio)
         
-        # Always recalculate distribution based on current N
-        # Split evenly among classes, with remainder going to last class
-        per_class = self.N // n_classes
-        distribution = [per_class] * n_classes
-        distribution[-1] = self.N - sum(distribution[:-1])
-        
-        indices = []
-        for class_idx, count in enumerate(distribution):
-            indices.extend([class_idx] * count)
-        
+        indices = [0] * n_slow + [1] * (self.N - n_slow)
         indices = np.array(indices)
         self.rng_structure.shuffle(indices)
         
         return indices
     
     def _initialize_arms(self):
-        """Initialize arm states."""
+        """Initialize arm states with per-arm p_s."""
         self.arms = []
         for i in range(self.N):
             class_idx = self.arm_class_indices[i]
             self.arms.append(ArmState(
                 s_true=0,
                 h=0,
-                delta=1,  # Start with Δ=1 (just synchronized)
-                class_idx=class_idx
+                delta=1,
+                class_idx=class_idx,
+                p_s=self.p_s_per_arm[i]  # Per-arm p_s
             ))
     
     def reset(self, seed: Optional[int] = None) -> np.ndarray:
-        """
-        Reset environment to initial state.
-        
-        UPDATED: If new seed is provided, reassign arm-class mapping
-        for proper Monte Carlo across seeds.
-        
-        Args:
-            seed: Optional new random seed
-            
-        Returns:
-            observations: Initial observable states (N, 2)
-        """
+        """Reset environment."""
         if seed is not None:
             self.rng_manager.reset(seed)
             self.rng_physics = self.rng_manager.get_generator("physics")
             self.rng_channel = self.rng_manager.get_generator("channel")
             self.rng_structure = self.rng_manager.get_generator("structure")
             
-            # UPDATED: Reassign arm-class mapping for new seed
             self.arm_class_indices = self._assign_arm_classes()
+            self.p_s_per_arm = self._generate_p_s(seed)
         
         self.epoch = 0
         self._initialize_arms()
@@ -147,124 +139,128 @@ class RMABEnvironment:
         return self._get_observations()
     
     def _get_observations(self) -> np.ndarray:
-        """Get observable states for all arms."""
+        """Get observable states (h, Δ) for all arms."""
         obs = np.zeros((self.N, 2), dtype=np.int32)
         for i, arm in enumerate(self.arms):
-            obs[i, 0] = arm.h
-            obs[i, 1] = arm.delta
+            obs[i] = [arm.h, arm.delta]
         return obs
-    
-    def _get_arm_config(self, arm_idx: int) -> ArmClassConfig:
-        """Get configuration for a specific arm."""
-        class_idx = self.arm_class_indices[arm_idx]
-        return self.arm_classes[class_idx]
     
     def step(self, actions: np.ndarray) -> StepResult:
         """
-        Execute one epoch step.
+        Execute one step.
         
-        Step Order (per DR-07):
-        1. Evolve all true states s(t) → s(t+1) FIRST
-        2. Process actions: success syncs to s(t+1)
-        3. Compute metrics
-        
-        Args:
-            actions: Binary array of shape (N,), 1=schedule, 0=idle
-                    Sum must be <= M
-        
-        Returns:
-            StepResult with observations, costs, and metrics
+        Uses per-arm p_s for success probability.
         """
-        actions = np.asarray(actions, dtype=np.int32)
-        assert actions.shape == (self.N,), f"Expected shape ({self.N},), got {actions.shape}"
-        assert actions.sum() <= self.M, f"Too many actions: {actions.sum()} > {self.M}"
+        assert len(actions) == self.N
+        assert actions.sum() <= self.M, f"Budget violation: {actions.sum()} > {self.M}"
         
-        successes = np.zeros(self.N, dtype=np.int32)
-        
-        # Step 1: Evolve true states FIRST (restless dynamics)
-        for i, arm in enumerate(self.arms):
-            arm_config = self._get_arm_config(i)
-            P = arm_config.P_bar
-            
-            # Sample next state from transition distribution
-            next_state = self.rng_physics.choice(
-                self.J, 
-                p=P[arm.s_true, :]
-            )
-            arm.s_true = next_state
-        
-        # Step 2: Process actions
-        for i, arm in enumerate(self.arms):
-            if actions[i] == 0:
-                # Idle: age increases
-                arm.delta = min(arm.delta + 1, self.delta_max)
-            else:
-                # Update attempt
-                arm_config = self._get_arm_config(i)
-                
-                # Success with probability p_s
-                if self.rng_channel.random() < arm_config.p_s:
-                    # Success: sync to EVOLVED true state s(t+1)
-                    arm.h = arm.s_true
-                    arm.delta = 1
-                    successes[i] = 1
-                else:
-                    # Failure: age increases
-                    arm.delta = min(arm.delta + 1, self.delta_max)
-        
-        # Step 3: Compute metrics
         oracle_aoii = np.zeros(self.N)
         control_costs = np.zeros(self.N)
+        successes = np.zeros(self.N, dtype=bool)
         
         for i, arm in enumerate(self.arms):
-            arm_config = self._get_arm_config(i)
+            class_idx = arm.class_idx
+            P_bar = self.arm_classes[class_idx].P_bar
             
-            oracle_aoii[i] = compute_oracle_aoii(
-                arm.s_true, arm.h, arm.delta, g_func=g_semantic
-            )
+            # 1. State evolution (restless)
+            probs = P_bar[arm.s_true, :]
+            probs = probs / probs.sum()  # Normalize
+            arm.s_true = self.rng_physics.choice(self.J, p=probs)
             
-            control_costs[i] = compute_control_cost(
-                arm.h, arm.delta, arm_config.P_bar
-            )
+            # 2. Action processing with PER-ARM p_s
+            if actions[i] == 1:
+                if self.rng_channel.random() < arm.p_s:  # Use arm.p_s
+                    arm.h = arm.s_true
+                    arm.delta = 1
+                    successes[i] = True
+                else:
+                    arm.delta = min(arm.delta + 1, self.delta_max)
+            else:
+                arm.delta = min(arm.delta + 1, self.delta_max)
+            
+            # 3. Compute costs
+            oracle_aoii[i] = compute_oracle_aoii(arm.s_true, arm.h, arm.delta)
+            control_costs[i] = compute_control_cost(arm.h, arm.delta, P_bar)
         
         self.epoch += 1
         
-        observations = self._get_observations()
-        total_aoii = oracle_aoii.sum()
-        
         return StepResult(
-            observations=observations,
+            observations=self._get_observations(),
             oracle_aoii=oracle_aoii,
             control_costs=control_costs,
             successes=successes,
-            rewards=-total_aoii,
+            rewards=-oracle_aoii.sum(),
             info={
                 'epoch': self.epoch,
-                'total_oracle_aoii': total_aoii,
                 'mean_oracle_aoii': oracle_aoii.mean(),
-                'total_control_cost': control_costs.sum(),
                 'mean_control_cost': control_costs.mean(),
-                'n_scheduled': actions.sum(),
-                'n_success': successes.sum(),
-                'success_rate': successes.sum() / max(actions.sum(), 1)
+                'success_rate': successes.mean() if actions.sum() > 0 else 0,
+                'scheduled': actions.sum(),
             }
         )
     
-    def get_arm_info(self, arm_idx: int) -> Dict[str, Any]:
-        """Get detailed information about a specific arm."""
-        arm = self.arms[arm_idx]
-        arm_config = self._get_arm_config(arm_idx)
+    def get_arm_p_s(self, arm_idx: int) -> float:
+        """Get p_s for a specific arm."""
+        return self.p_s_per_arm[arm_idx]
+    
+    def get_all_p_s(self) -> np.ndarray:
+        """Get p_s values for all arms."""
+        return self.p_s_per_arm.copy()
+
+
+class EpisodeLogger:
+    """Logs episode data for analysis."""
+    
+    def __init__(self, N: int, T: int, detailed: bool = False):
+        self.N = N
+        self.T = T
+        self.detailed = detailed
+        
+        self.epoch_oracle_aoii = np.zeros(T)
+        self.epoch_control_cost = np.zeros(T)
+        self.epoch_n_scheduled = np.zeros(T, dtype=np.int32)
+        self.epoch_n_success = np.zeros(T, dtype=np.int32)
+        
+        if detailed:
+            self.arm_oracle_aoii = np.zeros((T, N))
+            self.arm_h = np.zeros((T, N), dtype=np.int32)
+            self.arm_delta = np.zeros((T, N), dtype=np.int32)
+            self.arm_actions = np.zeros((T, N), dtype=np.int32)
+            self.arm_success = np.zeros((T, N), dtype=np.int32)
+    
+    def log(self, epoch: int, result: StepResult, actions: np.ndarray):
+        """Log data for one epoch."""
+        self.epoch_oracle_aoii[epoch] = result.oracle_aoii.mean()
+        self.epoch_control_cost[epoch] = result.control_costs.mean()
+        self.epoch_n_scheduled[epoch] = actions.sum()
+        self.epoch_n_success[epoch] = result.successes.sum()
+        
+        if self.detailed:
+            self.arm_oracle_aoii[epoch] = result.oracle_aoii
+            self.arm_h[epoch] = result.observations[:, 0]
+            self.arm_delta[epoch] = result.observations[:, 1]
+            self.arm_actions[epoch] = actions
+            self.arm_success[epoch] = result.successes
+    
+    def get_summary(self, burn_in_ratio: float = 0.5) -> Dict[str, float]:
+        """Get summary statistics over evaluation period."""
+        burn_in = int(len(self.epoch_oracle_aoii) * burn_in_ratio)
+        eval_aoii = self.epoch_oracle_aoii[burn_in:]
+        eval_cost = self.epoch_control_cost[burn_in:]
         
         return {
-            's_true': arm.s_true,
-            'h': arm.h,
-            'delta': arm.delta,
-            'class_name': arm_config.name,
-            'class_idx': arm.class_idx,
-            'p_s': arm_config.p_s,
-            'oracle_aoii': compute_oracle_aoii(arm.s_true, arm.h, arm.delta),
-            'control_cost': compute_control_cost(arm.h, arm.delta, arm_config.P_bar)
+            'mean_oracle_aoii': eval_aoii.mean(),
+            'std_oracle_aoii': eval_aoii.std(),
+            'mean_control_cost': eval_cost.mean(),
+            'std_control_cost': eval_cost.std(),
+            'total_scheduled': self.epoch_n_scheduled.sum(),
+            'total_success': self.epoch_n_success.sum(),
+            'avg_success_rate': self.epoch_n_success.sum() / max(self.epoch_n_scheduled.sum(), 1)
         }
+    
+    def get_trajectory(self) -> np.ndarray:
+        """Get full AoII trajectory."""
+        return self.epoch_oracle_aoii.copy()
 
 
 class EpisodeLogger:
@@ -323,31 +319,19 @@ class EpisodeLogger:
 
 
 if __name__ == "__main__":
-    from config import SimulationConfig
+    print("=== Environment v3 Test (Heterogeneous p_s) ===")
     
-    print("=== Environment Test (v2) ===")
     config = SimulationConfig()
     env = RMABEnvironment(config, seed=42)
     
-    print(f"N={env.N}, M={env.M}, J={env.J}")
-    print(f"p_s={config.arm_classes[0].p_s} (from DR-06B R={config.experiment.R})")
+    print(f"N={env.N}, M={env.M}")
+    print(f"p_s range: [{env.p_s_per_arm.min():.3f}, {env.p_s_per_arm.max():.3f}]")
+    print(f"p_s std: {env.p_s_per_arm.std():.3f}")
     
-    # Test reset with new seed reassigns arm-class
-    print("\n=== Testing reset with new seed ===")
-    old_mapping = env.arm_class_indices.copy()
-    env.reset(seed=123)
-    new_mapping = env.arm_class_indices
-    print(f"Mapping changed: {not np.array_equal(old_mapping, new_mapping)}")
+    # Test step
+    obs = env.reset()
+    actions = np.zeros(env.N, dtype=np.int32)
+    actions[:env.M] = 1
     
-    # Test episode
-    print("\n=== Short Episode Test ===")
-    env.reset(seed=42)
-    
-    for t in range(10):
-        actions = np.zeros(env.N, dtype=np.int32)
-        selected = np.random.choice(env.N, env.M, replace=False)
-        actions[selected] = 1
-        
-        result = env.step(actions)
-        print(f"Epoch {t+1}: Mean AoII={result.info['mean_oracle_aoii']:.3f}, "
-              f"Successes={result.info['n_success']}/{result.info['n_scheduled']}")
+    result = env.step(actions)
+    print(f"\nStep result: mean_aoii={result.info['mean_oracle_aoii']:.3f}")
