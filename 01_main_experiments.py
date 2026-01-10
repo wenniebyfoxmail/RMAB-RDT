@@ -988,15 +988,15 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
     """
     if quick_test:
         T, n_seeds = 300, 2
-        N_values = [20]
-        M_values = [2, 5]
-        ps_values = [0.90, 0.996]
+        N_values = [20, 50, 100]
+        M_values = [1, 2, 3, 5]
+        ps_values = [0.70, 0.90, 0.996]
         N_base = 30
     else:
         T, n_seeds = 1000, 5
         N_values = [20, 50, 100, 200]
-        M_values = [1, 2, 3, 5, 8, 10]  # 更多低 M 点
-        ps_values = [0.70, 0.80, 0.90, 0.95, 0.996]
+        M_values = [1, 2, 3, 5, 10]  # 更多低 M 点
+        ps_values =  [0.50, 0.70, 0.85, 0.95, 0.996]
         N_base = 80
 
     # Determine data source
@@ -1044,7 +1044,7 @@ def run_all_experiments(output_dir: str = "results", quick_test: bool = False,
     print("=" * 60)
 
     fig1_results = {}
-    budget_ratio = 0.05
+    budget_ratio = 0.03
 
     for N in N_values:
         M = max(1, int(N * budget_ratio))
