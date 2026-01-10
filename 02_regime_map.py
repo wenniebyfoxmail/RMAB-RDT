@@ -163,9 +163,13 @@ def generate_regime_map(output_dir: str = "results",
                         N: int = 80,            # 改为 80 以匹配 Fig 2
                         T: int = 500,
                         n_seeds: int = 5,
-                        quick_test: bool = False):
+                        quick_test: bool = False,
+                        n_workers: int = None):
     """
     Generate regime map: heterogeneity × (M/N) heatmap.
+
+    Args:
+        n_workers: Number of parallel workers. None=auto, 1=sequential (for Colab)
     """
     setup_ieee_style()
 
@@ -190,7 +194,13 @@ def generate_regime_map(output_dir: str = "results",
     print(f"M/N grid: {budget_ratios}")
 
     total_configs = len(heterogeneities) * len(budget_ratios)
-    n_workers = get_optimal_workers(total_configs)
+
+    # 使用传入的 n_workers 或自动检测
+    if n_workers is None:
+        n_workers = get_optimal_workers(total_configs)
+    else:
+        n_workers = max(1, int(n_workers))
+
     print(f"Parallel execution: {n_workers} workers, {total_configs} configs")
     print("=" * 70)
 
@@ -327,5 +337,6 @@ if __name__ == "__main__":
     generate_regime_map(
         output_dir=args.output,
         N=args.N,
-        quick_test=args.quick
+        quick_test=args.quick,
+        n_workers=args.workers  # 传递 workers 参数
     )
